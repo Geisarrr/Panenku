@@ -9,8 +9,13 @@ group = "com.panenku"
 version = "0.1.0"
 // 1.21.4 supports current Docker Engine API versions.
 extra["testcontainers.version"] = "1.21.4"
-java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
-kotlin { compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        freeCompilerArgs.add("-Xjsr305=strict")
+    }
+}
 repositories { mavenCentral() }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")

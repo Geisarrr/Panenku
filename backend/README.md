@@ -6,9 +6,29 @@ Dikembangkan sebagai tugas akhir praktikum Pengembangan Aplikasi Perangkat Berge
 
 ---
 
-## Status implementasi bagian Gibran
+## Status implementasi backend bersama
 
-Implementasi katalog/produk, keranjang, jadwal, dan checkout atomik tersedia, serta sudah digabungkan dengan auth/register/login Geisar. Baca [catatan integrasi Geisar](docs/INTEGRASI_GEISAR.md) untuk konfigurasi bersama dan penanganan konflik. Baca [panduan implementasi Gibran](docs/IMPLEMENTASI_GIBRAN.md) untuk cara menjalankan, perubahan kontrak checkout, pengujian PostgreSQL, dan integrasi dengan bagian Rampan. Diagram serta daftar fitur di bawah merupakan spesifikasi target; belum semua modul MVP diimplementasikan.
+Backend Panenku dikerjakan oleh **Mochammad Fani Al Gibran (Gibran)** dan **Mohammad Geisar Rampan (Geisar/Rampan)**. Pembagian implementasi backend dua orang berikut mengikuti pembagian tugas terbaru; tabel anggota di bagian akhir tetap mencatat pembagian fungsi pada laporan praktikum.
+
+### Pembagian tugas backend
+
+| Penanggung jawab | Lingkup tanggung jawab | Status implementasi saat ini |
+|---|---|---|
+| **Gibran** | Katalog dan produk (F1), keranjang dan reservasi stok (F2), jadwal pengantaran (F3), perhitungan dan checkout atomik (F4) | Implementasi awal katalog, komoditas/produk, keranjang, validasi jadwal/area, snapshot, limit, reservasi stok atomik, dan idempotensi checkout tersedia. |
+| **Geisar / Rampan** | Auth dan user; status pesanan (F5); verifikasi pembayaran (F6); refund dan eskalasi (F7); admin/pengaturan; infrastruktur dan scheduler | Register/login JWT, profil awal, dan fondasi infrastruktur tersedia. Scheduler kedaluwarsa sudah diselaraskan dalam integrasi bersama. Status lanjutan, pembayaran, refund, admin, serta pengelolaan profil lanjutan masih perlu dilengkapi. |
+
+### Kontribusi dan integrasi
+
+- **Geisar** membuat struktur awal, README, serta spesifikasi backend; menambahkan [implementasi auth dan user](https://github.com/Geisarrr/Panenku/commit/ac3d65f33a8ded3e298e511b9366694f9bef8b4d) dan [fondasi infrastruktur/scheduler](https://github.com/Geisarrr/Panenku/commit/2d26973ba79ce5ddcc6cf991ba43f64f16bc2b15).
+- **Gibran** mengerjakan modul katalog/produk, keranjang, jadwal, checkout dan stok sesuai pembagian backend, dengan pengujian aturan bisnis serta konkurensi stok.
+- **Integrasi bersama** menyelaraskan konfigurasi build, entity/repository pengguna, JWT UUID, respons/error API, dan pelepasan stok kedaluwarsa. Build menggunakan JDK 17. Pengujian backend saat ini mencakup 39 tes yang telah lulus pada PostgreSQL melalui Testcontainers.
+
+Panduan teknis:
+
+- [Panduan modul katalog, keranjang, jadwal, dan checkout](docs/IMPLEMENTASI_GIBRAN.md).
+- [Catatan integrasi auth, infrastruktur, dan scheduler](docs/INTEGRASI_GEISAR.md).
+
+Diagram dan daftar endpoint di bawah merupakan spesifikasi target MVP; sebagian modul belum diimplementasikan. Helper upload MinIO masih berupa placeholder, sementara refresh/logout, pembayaran, refund, dan beberapa fungsi admin masih perlu diselesaikan.
 
 ## 📋 Ringkasan Proyek
 
@@ -646,7 +666,7 @@ classDiagram
     AuthController ..> AuthService : uses
     AuthService ..> UserRepository : uses
     AuthService ..> User : manages
-    UserRepository <|..| User : Spring Data JPA for
+    UserRepository ..> User : persists
     
     %% ================================================================
     %% CORE DOMAIN: USER & PROFILES (1:1)
@@ -858,13 +878,13 @@ classDiagram
     
     class CheckoutController {
         <<REST Controller>>
-        +POST /checkout
+        +checkout(CheckoutRequest)
     }
     
     class OrderController {
         <<REST Controller>>
-        +GET /orders
-        +PUT /orders/{id}/status
+        +listOrders()
+        +updateStatus(UUID, FulfillmentUpdateRequest)
     }
     
     CheckoutController ..> CheckoutService : calls
@@ -908,7 +928,7 @@ classDiagram
     
     class CheckoutRequest {
         <<DTO>>
-        -items: List<CartItemRequest>
+        -items: List~CheckoutItemRequest~
         -fulfillmentMethod: String
         -scheduledDate: LocalDate
     }
@@ -934,7 +954,7 @@ classDiagram
 | `<<JpaRepository>>` | Interface Spring Data JPA untuk akses DB | `UserRepository`, `OrderRepository` |
 | `<<DTO>>` | Data Transfer Object untuk request/response | `CheckoutRequest`, `OrderDTO` |
 | `<<Utility>>` / `<<Filter>>` / `<<Controller Advice>>` | Komponen penunjang umum | `JwtProvider`, `RoleGuard`, `ExceptionHandler` |
-| `--|>` | Inheritance / Implementasi | `UserRepository <|..| User` |
+| `..|>` | Implementasi interface | `UserRepository ..|> JpaRepository` |
 | `*--` | Komposisi (milik, tidak bisa berdiri sendiri) | `Order *-- OrderItem` |
 | `o--` | Asosiasi (terhubung tapi independen) | `User o-- FarmerProfile` |
 | `..>` | Dependency / penggunaan | `Controller ..> Service` |
@@ -1277,7 +1297,7 @@ Content-Type: application/json
 ## 🚀 Cara Menjalankan
 
 ### Prasyarat
-- JDK 21 (untuk konfigurasi build saat ini)
+- JDK 17 (untuk konfigurasi build saat ini)
 - Docker & Docker Compose (untuk PostgreSQL & MinIO)
 - Gradle
 

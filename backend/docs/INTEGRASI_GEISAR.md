@@ -4,7 +4,7 @@ Integrasi awal menggabungkan dua riwayat: backend fork Gibran (3c4eca5) dan back
 
 ## Konfigurasi akhir
 
-- Spring Boot 3.5.7, Kotlin 2.1.21, JDK 21, Gradle Wrapper 8.14.3. Semua plugin, repositories, JPA all-open/no-arg, dan dependensi test PostgreSQL tetap tersedia.
+- Spring Boot 3.5.7, Kotlin 2.1.21, JDK 17, Gradle Wrapper 8.14.3. Semua plugin, repositories, JPA all-open/no-arg, dan dependensi test PostgreSQL tetap tersedia.
 - Dependensi JJWT 0.12.3 dari auth Geisar ditambahkan. Decoder resource-server memakai HS256; penerbit token juga memakai HS256 secara eksplisit, issuer yang sama, dan subject UUID user.
 - app.jwt.secret/issuer mengacu ke panenku.jwt.secret/issuer. JWT_SECRET tetap wajib minimal 32 byte UTF-8. JWT_EXPIRATION mengatur masa token dalam milidetik, default 24 jam. Tidak ada secret produksi bawaan.
 - Satu entity User dan UserRepository untuk autentikasi dan pemeriksaan role/locking, satu ApiResponse bersama, dan satu ExceptionHandler. User timestamps memakai Instant agar konsisten dengan TIMESTAMPTZ PostgreSQL.
@@ -71,3 +71,10 @@ git fetch origin
 ```
 
 Lihat git status -sb. Bila branch kelompok masih commit 2d26973, commit itu sudah menjadi ancestor hasil integrasi ini, sehingga git push origin backend dapat dilakukan tanpa force. Jika ada commit kelompok yang lebih baru, selaraskan dahulu; jangan menimpa pekerjaan rekan. Jangan menjalankan git merge --abort ketika tidak ada proses merge aktif.
+
+
+## Target Java 17
+
+Build menggunakan toolchain JDK 17 dan target bytecode Kotlin JVM 17, mengikuti target Java awal proyek Geisar. Spring Boot 3.5.7 dan dependensi yang digunakan mendukung Java 17. Tidak perlu mengubah instalasi Java milik anggota tim lain.
+
+Untuk Windows, pilih instalasi JDK 17 di Gradle JDK Android Studio. Terminal memakai JAVA_HOME sendiri; arahkan ke folder JDK 17 yang benar lalu jalankan .\gradlew.bat --version. Gradle tetap versi 8.14.3. Setelah Docker Desktop menunjukkan Engine running, jalankan .\gradlew.bat test dari folder backend. Mengubah JAVA_HOME pada sesi PowerShell hanya berlaku untuk sesi tersebut.

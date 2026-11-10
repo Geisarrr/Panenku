@@ -4,7 +4,7 @@ Kode ini mulai mengimplementasikan pembagian backend terbaru: F1 katalog/produk,
 
 ## Yang sudah ada
 
-- Kotlin 2.1, Spring Boot 3.5, Spring Data JPA, Flyway, PostgreSQL, Gradle Wrapper. Build menggunakan **JDK 21**.
+- Kotlin 2.1, Spring Boot 3.5, Spring Data JPA, Flyway, PostgreSQL, Gradle Wrapper. Build menggunakan **JDK 17**.
 - Katalog publik: pencarian nama produk/komoditas/toko, filter komoditas, urut harga, paginasi. Produk habis tetap terlihat dengan stok tersedia 0.
 - Komoditas: daftar aktif publik serta daftar/tambah/ubah/nonaktif oleh admin (`PUT` dengan `isActive=false`). Tidak ada hard-delete yang menghapus referensi transaksi.
 - Produk petani: daftar/detail/tambah/ubah/nonaktif; cek kepemilikan; draft untuk petani belum terverifikasi; publikasi membutuhkan KTP disetujui, akun aktif, lokasi, metode pembayaran lengkap, foto, dan stok positif.
