@@ -1,9 +1,8 @@
 package com.panenku.backend.common.security
 
-import com.panenku.backend.common.exception.*
+import com.panenku.backend.common.exception.forbidden
 import com.panenku.backend.modules.shared.entity.User
 import com.panenku.backend.modules.shared.repository.UserRepository
-import org.springframework.http.HttpStatus
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -19,7 +18,13 @@ class ActorService(private val accounts: UserRepository) {
         return user
     }
 
-    private fun forbidden(message: String): Nothing {
-        throw AppException(message, HttpStatus.FORBIDDEN)
+    /**
+     * Sama seperti [require], tetapi mengunci baris user.
+     * Dipakai operasi yang harus serial per akun, misalnya checkout dengan idempotency key.
+     */
+    fun requireLocked(id: UUID, role: String): User {
+        val user = accounts.lockById(id)
+        if (user == null || user.role != role || user.status != "active") forbidden("Akses $role tidak diizinkan.")
+        return user
     }
 }
