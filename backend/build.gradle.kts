@@ -1,60 +1,40 @@
 plugins {
-    id("org.springframework.boot") version "3.2.5"
-    id("io.spring.dependency-management") version "1.1.4"
-    kotlin("jvm") version "1.9.22"
-    kotlin("plugin.spring") version "1.9.22"
+    kotlin("jvm") version "2.1.21"
+    kotlin("plugin.spring") version "2.1.21"
+    kotlin("plugin.jpa") version "2.1.21"
+    id("org.springframework.boot") version "3.5.7"
+    id("io.spring.dependency-management") version "1.1.7"
 }
-
-group = "com.panenku.backend"
-version = "1.0.0"
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
+group = "com.panenku"
+version = "0.1.0"
+// 1.21.4 supports current Docker Engine API versions.
+extra["testcontainers.version"] = "1.21.4"
+java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        freeCompilerArgs.add("-Xjsr305=strict")
+    }
 }
-
+repositories { mavenCentral() }
 dependencies {
-    // Spring Web - untuk buat REST API controller (endpoint HTTP)
     implementation("org.springframework.boot:spring-boot-starter-web")
-
-    // Spring Data JPA + Hibernate - untuk akses database PostgreSQL
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-
-    // PostgreSQL Driver - koneksi ke database PostgreSQL
-    implementation("org.postgresql:postgresql:42.6.0")
-
-    // Spring Security - untuk autentikasi & otorisasi (JWT, role guard)
-    implementation("org.springframework.boot:spring-boot-starter-security")
-
-    // Validation - untuk validasi input (@NotBlank, @Email, @Size, dll)
     implementation("org.springframework.boot:spring-boot-starter-validation")
-
-    // JWT - untuk buat & validasi JSON Web Token login
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+    runtimeOnly("org.postgresql:postgresql")
     implementation("io.jsonwebtoken:jjwt-api:0.12.3")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.3")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.3")
-
-    // Flyway - untuk migrasi database (versi skema SQL: V1__, V2__, dst)
-    implementation("org.flywaydb:flyway-core")
-
-    // Kotlin stdlib
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
-
-    // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
-
-tasks.withClass<JavaCompile> {
-    javaCompiler.configure {
-        compilerOptions.configure {
-            encoding = "UTF-8"
-        }
-    }
-}
-
-tasks.withClass<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        freeCompilerArgs = listOf("-Xjvm-release=17")
-        jvmTarget = "17"
-    }
-}
+allOpen { annotation("jakarta.persistence.Entity") }
+tasks.withType<Test> { useJUnitPlatform() }

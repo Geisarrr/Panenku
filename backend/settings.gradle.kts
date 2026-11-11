@@ -1,1 +1,7 @@
-    rootProject.name = "panenku-backend"
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+rootProject.name = "panenku-backend"

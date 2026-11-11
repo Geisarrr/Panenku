@@ -1,6 +1,6 @@
 package com.panenku.backend.common.dto
 
-import java.time.LocalDateTime
+import java.time.Instant
 
 /**
  * Wrapper respons JSON standar untuk semua endpoint API.
@@ -24,10 +24,10 @@ import java.time.LocalDateTime
  * }
  */
 data class ApiResponse<T>(
-    val success: Boolean,
-    val data: T?,
-    val message: String,
-    val timestamp: LocalDateTime = LocalDateTime.now()
+    val success: Boolean = true,
+    val data: T? = null,
+    val message: String = "Berhasil",
+    val timestamp: Instant = Instant.now()
 )
 
 /**

@@ -1,38 +1,19 @@
 package com.panenku.backend.common.storage
 
-import org.springframework.beans.factory.annotation.Value
+import com.panenku.backend.common.exception.ApiException
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.web.multipart.MultipartFile
-import java.util.UUID
 
-/**
- * Penyimpanan file privat (MinIO / AWS S3).
- * File KTP, bukti pembayaran, dan bukti refund disini — tidak ada link publik permanen.
- */
+/** Storage is not implemented yet. Never return an object path before persistence succeeds. */
 @Component
+@Suppress("UNUSED_PARAMETER")
 class FileStorage {
+    fun upload(folder: String, file: MultipartFile): String = unavailable()
+    fun delete(path: String): Unit = unavailable()
 
-    @Value("\${minio.bucket}")
-    private lateinit var bucket: String
-
-    /**
-     * Upload file dan kembalikan path yang disimpan di bucket.
-     * Path contoh: ktp/uuid-filename.jpg
-     */
-    fun upload(folder: String, file: MultipartFile): String {
-        val fileName = "${UUID.randomUUID()}_${file.originalFilename}"
-        val path = "$folder/$fileName"
-
-        // TODO: Implementasi upload ke MinIO/S3 setelah Gradle sync selesai
-        // Misal: minioClient.putObject(bucket, path, file.inputStream, file.contentType)
-
-        return path
-    }
-
-    /**
-     * Hapus file dari storage.
-     */
-    fun delete(path: String) {
-        // TODO: Implementasi hapus file dari MinIO/S3
-    }
+    private fun unavailable(): Nothing = throw ApiException(
+        HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_NOT_CONFIGURED",
+        "Penyimpanan berkas belum dikonfigurasi. Tidak ada berkas yang diunggah atau dihapus."
+    )
 }
