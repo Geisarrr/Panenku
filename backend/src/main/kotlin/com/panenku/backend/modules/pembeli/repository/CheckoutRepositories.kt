@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.Page
 import jakarta.persistence.LockModeType
 import java.time.Instant
 import java.util.UUID
@@ -15,12 +16,17 @@ interface CartRepository : JpaRepository<CartItem, UUID> {
     fun findByBuyerIdAndProductId(buyerId: UUID, productId: UUID): CartItem?
 }
 interface ExpiredOrderReference { val id: UUID; val farmerId: UUID }
+interface OrderOwnerReference { val farmerId: UUID }
 
 interface OrderRepository : JpaRepository<Order, UUID> {
     fun findByBuyerIdAndIdempotencyKey(buyerId: UUID, idempotencyKey: String): Order?
+    fun findAllByBuyerId(buyerId: UUID, pageable: Pageable): Page<Order>
+    fun findAllByFarmerId(farmerId: UUID, pageable: Pageable): Page<Order>
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from Order o where o.id = :id")
     fun lockById(@Param("id") id: UUID): Order?
+    @Query("select o.farmerId as farmerId from Order o where o.id = :id")
+    fun findOwnerReference(@Param("id") id: UUID): OrderOwnerReference?
     @Query("""select o.id as id, o.farmerId as farmerId from Order o
         where o.expiresAt <= :now and o.orderStatus in ('menunggu_petani','menunggu_pembayaran')
         and o.paymentStatus in ('belum_dibayar','bukti_ditolak') order by o.expiresAt, o.id""")
@@ -34,4 +40,6 @@ interface StockReservationRepository : JpaRepository<StockReservation, UUID> {
     fun activeProductIds(@Param("orderId") orderId: UUID): List<UUID>
     fun findByOrderIdAndStatus(orderId: UUID, status: String): List<StockReservation>
 }
-interface OrderStatusHistoryRepository : JpaRepository<OrderStatusHistory, UUID>
+interface OrderStatusHistoryRepository : JpaRepository<OrderStatusHistory, UUID> {
+    fun findAllByOrderIdOrderByChangedAtAsc(orderId: UUID): List<OrderStatusHistory>
+}

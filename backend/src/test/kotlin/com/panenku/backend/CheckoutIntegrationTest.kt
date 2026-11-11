@@ -12,7 +12,11 @@ import com.panenku.backend.modules.pembeli.dto.*
 import com.panenku.backend.modules.pembeli.service.*
 import com.panenku.backend.modules.petani.dto.ProductRequest
 import com.panenku.backend.modules.petani.service.ProductService
+import com.panenku.backend.modules.shared.dto.FulfillmentUpdateRequest
+import com.panenku.backend.modules.shared.dto.OrderCancelRequest
+import com.panenku.backend.modules.shared.dto.OrderRespondRequest
 import com.panenku.backend.modules.shared.service.CatalogService
+import com.panenku.backend.modules.shared.service.OrderLifecycleService
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -69,6 +73,7 @@ class CheckoutIntegrationTest {
     @Autowired lateinit var appConfig: com.panenku.backend.config.AppConfig
     @Autowired lateinit var checkout: CheckoutService
     @Autowired lateinit var cart: CartService
+    @Autowired lateinit var lifecycle: OrderLifecycleService
     @Autowired lateinit var productService: ProductService
     @Autowired lateinit var catalog: CatalogService
     @Autowired lateinit var mvc: MockMvc
@@ -101,6 +106,29 @@ class CheckoutIntegrationTest {
     }
     fun request(quantity: String = "0.75", price: Long = 12000): CheckoutRequest = CheckoutRequest(
         listOf(CheckoutItemRequest(product, BigDecimal(quantity), price)), "pickup", date, "08:00-10:00", 0)
+    fun deliveryRequest(quantity: String = "0.75"): CheckoutRequest = request(quantity).copy(
+        fulfillmentMethod = "delivery", expectedDeliveryFee = 10000,
+        deliveryAddress = "Alamat dummy", deliveryDistrict = "kepanjen")
+    /**
+     * Membuat pesanan lalu memaksa status lewat SQL. Status pemenuhan F5 membutuhkan
+     * pembayaran terverifikasi, sedangkan endpoint F6 belum tersedia.
+     */
+    fun orderFor(
+        req: CheckoutRequest = request(),
+        status: String = "menunggu_petani",
+        payment: String = "belum_dibayar",
+        owner: UUID = buyer
+    ): UUID {
+        val order = checkout.checkout(owner, "f5-${UUID.randomUUID()}", req)
+        db.update("UPDATE orders SET order_status=?, payment_status=? WHERE id=?", status, payment, order.orderId)
+        return order.orderId
+    }
+    fun stockPhysical(): BigDecimal =
+        db.queryForObject("SELECT stock_physical FROM products WHERE id=?", BigDecimal::class.java, product)!!
+    fun reservationStatus(orderId: UUID): String =
+        db.queryForObject("SELECT status FROM stock_reservations WHERE order_id=?", String::class.java, orderId)!!
+    fun orderStatus(orderId: UUID): String =
+        db.queryForObject("SELECT order_status FROM orders WHERE id=?", String::class.java, orderId)!!
     fun count(table: String): Long = db.queryForObject("SELECT count(*) FROM $table", Long::class.java)!!
     fun reserved(): BigDecimal = db.queryForObject("SELECT stock_reserved FROM products WHERE id=?", BigDecimal::class.java, product)!!
     fun <T> parallel(first: () -> T, second: () -> T): List<Result<T>> {
@@ -532,5 +560,184 @@ class CheckoutIntegrationTest {
         mvc.perform(post("/api/v1/buyer/checkout").with(jwt().jwt { it.subject(buyer.toString()) })
             .header("Idempotency-Key", "http-checkout").contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(request())))
             .andExpect(status().isCreated).andExpect(jsonPath("$.data.orderStatus").value("menunggu_petani"))
+    }
+
+    @Test fun `F5 farmer accepting resets payment window and records history`() {
+        val id = orderFor()
+        (clock as TestClock).time.set(Instant.parse("2026-11-10T01:00:00Z"))
+        val view = lifecycle.respondByFarmer(farmer, id, OrderRespondRequest("terima"))
+
+        assertEquals("menunggu_pembayaran", view.orderStatus)
+        assertEquals(Instant.parse("2026-11-11T01:00:00Z"), view.expiresAt)
+        assertEquals(2, view.history.size)
+        assertEquals("petani", view.history.last().actorRole)
+        assertEquals("menunggu_petani", view.history.last().fromStatus)
+        assertEquals("menunggu_pembayaran", view.history.last().toStatus)
+        assertEquals("active", reservationStatus(id))
+        assertEquals(BigDecimal("0.75"), reserved())
+    }
+
+    @Test fun `F5 rejecting requires reason and releases stock`() {
+        val id = orderFor()
+
+        val missingReason = assertThrows(ApiException::class.java) {
+            lifecycle.respondByFarmer(farmer, id, OrderRespondRequest("tolak"))
+        }
+        assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, missingReason.status)
+        assertEquals("menunggu_petani", orderStatus(id))
+        assertEquals(BigDecimal("0.75"), reserved())
+
+        assertThrows(ApiException::class.java) {
+            lifecycle.respondByFarmer(otherFarmer, id, OrderRespondRequest("tolak", "bukan milik saya"))
+        }
+        assertEquals("menunggu_petani", orderStatus(id))
+
+        val view = lifecycle.respondByFarmer(farmer, id, OrderRespondRequest("tolak", "Stok habis"))
+        assertEquals("ditolak", view.orderStatus)
+        assertEquals("released", reservationStatus(id))
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertEquals(BigDecimal("10.00"), stockPhysical())
+    }
+
+    @Test fun `F5 buyer can cancel only before farmer responds`() {
+        val id = orderFor()
+        val view = lifecycle.cancelByBuyer(buyer, id, OrderCancelRequest("berubah pikiran"))
+
+        assertEquals("dibatalkan", view.orderStatus)
+        assertEquals("released", reservationStatus(id))
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertTrue(view.history.last().note!!.contains("berubah pikiran"))
+
+        val accepted = orderFor(status = "menunggu_pembayaran")
+        val conflict = assertThrows(ApiException::class.java) {
+            lifecycle.cancelByBuyer(buyer, accepted, OrderCancelRequest())
+        }
+        assertEquals(org.springframework.http.HttpStatus.CONFLICT, conflict.status)
+        assertEquals("menunggu_pembayaran", orderStatus(accepted))
+
+        val otherBuyersOrder = orderFor()
+        assertThrows(ApiException::class.java) {
+            lifecycle.cancelByBuyer(otherBuyer, otherBuyersOrder, OrderCancelRequest())
+        }
+        assertEquals("menunggu_petani", orderStatus(otherBuyersOrder))
+    }
+
+    @Test fun `F5 pickup fulfillment then buyer receive completes order`() {
+        val id = orderFor(status = "diproses", payment = "terverifikasi")
+
+        val ready = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("siap_diambil"))
+        assertEquals("siap_diambil", ready.orderStatus)
+        assertEquals("active", reservationStatus(id))
+        assertEquals(BigDecimal("0.75"), reserved())
+        assertEquals(BigDecimal("10.00"), stockPhysical())
+
+        val waiting = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("menunggu_penerimaan"))
+        assertEquals("menunggu_penerimaan", waiting.orderStatus)
+        assertEquals("fulfilled", reservationStatus(id))
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertEquals(BigDecimal("9.25"), stockPhysical())
+
+        val done = lifecycle.receiveByBuyer(buyer, id)
+        assertEquals("selesai", done.orderStatus)
+        assertNotNull(done.receivedAt)
+        assertEquals("selesai", orderStatus(id))
+    }
+
+    @Test fun `F5 delivery fulfillment rejects pickup status`() {
+        val id = orderFor(req = deliveryRequest(), status = "diproses", payment = "terverifikasi")
+
+        val invalid = assertThrows(ApiException::class.java) {
+            lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("siap_diambil"))
+        }
+        assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, invalid.status)
+        assertEquals("diproses", orderStatus(id))
+
+        val shipped = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("diantar"))
+        assertEquals("diantar", shipped.orderStatus)
+        val waiting = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("menunggu_penerimaan"))
+        assertEquals("menunggu_penerimaan", waiting.orderStatus)
+        assertEquals(BigDecimal("9.25"), stockPhysical())
+    }
+
+    @Test fun `F5 fulfillment requires verified payment`() {
+        val id = orderFor(status = "diproses", payment = "menunggu_verifikasi")
+
+        val conflict = assertThrows(ApiException::class.java) {
+            lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("siap_diambil"))
+        }
+        assertEquals(org.springframework.http.HttpStatus.CONFLICT, conflict.status)
+        assertEquals("diproses", orderStatus(id))
+        assertEquals("active", reservationStatus(id))
+    }
+
+    @Test fun `F5 failed fulfillment requires note and releases stock`() {
+        val id = orderFor(status = "diproses", payment = "terverifikasi")
+
+        val missingNote = assertThrows(ApiException::class.java) {
+            lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("gagal_dipenuhi"))
+        }
+        assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, missingNote.status)
+        assertEquals("diproses", orderStatus(id))
+
+        val view = lifecycle.updateFulfillment(
+            farmer, id, FulfillmentUpdateRequest("gagal_dipenuhi", "Panen gagal")
+        )
+        assertEquals("gagal_dipenuhi", view.orderStatus)
+        assertEquals("released", reservationStatus(id))
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertEquals(BigDecimal("10.00"), stockPhysical())
+    }
+
+    @Test fun `F5 order lists and details enforce ownership and pagination`() {
+        val first = orderFor()
+        val second = orderFor(owner = otherBuyer)
+
+        val buyerPage = lifecycle.listForBuyer(buyer, 0, 20)
+        assertEquals(1, buyerPage.items.size)
+        assertEquals(first, buyerPage.items.single().orderId)
+        assertTrue(buyerPage.items.single().history.isEmpty())
+
+        val farmerPage = lifecycle.listForFarmer(farmer, 0, 20)
+        assertEquals(2, farmerPage.items.size)
+        assertEquals(setOf(first, second), farmerPage.items.map { it.orderId }.toSet())
+        assertEquals("Toko $farmer", lifecycle.detailForFarmer(farmer, first).storeName)
+
+        assertThrows(ApiException::class.java) { lifecycle.detailForBuyer(otherBuyer, first) }
+        assertThrows(ApiException::class.java) { lifecycle.detailForFarmer(otherFarmer, first) }
+        assertThrows(ApiException::class.java) { lifecycle.listForFarmer(buyer, 0, 20) }
+        assertThrows(ApiException::class.java) { lifecycle.listForBuyer(buyer, 0, 0) }
+        assertThrows(ApiException::class.java) { lifecycle.listForBuyer(buyer, 0, 101) }
+    }
+
+    @Test fun `F5 HTTP endpoints enforce role and return order data`() {
+        val id = orderFor()
+
+        mvc.perform(get("/api/v1/buyer/orders").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[0].orderId").value(id.toString()))
+            .andExpect(jsonPath("$.data.items[0].history").isEmpty)
+
+        mvc.perform(get("/api/v1/petani/orders").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[0].orderId").value(id.toString()))
+
+        mvc.perform(get("/api/v1/buyer/orders").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isForbidden)
+
+        mvc.perform(get("/api/v1/buyer/orders/$id").with(jwt().jwt { it.subject(otherBuyer.toString()) }))
+            .andExpect(status().isForbidden)
+
+        mvc.perform(put("/api/v1/petani/orders/$id/respond").with(jwt().jwt { it.subject(farmer.toString()) })
+            .contentType(MediaType.APPLICATION_JSON).content("""{"decision":"terima"}"""))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.orderStatus").value("menunggu_pembayaran"))
+
+        mvc.perform(post("/api/v1/buyer/orders/$id/cancel").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isConflict)
+
+        mvc.perform(post("/api/v1/buyer/orders/$id/cancel").with(jwt().jwt { it.subject(buyer.toString()) })
+            .contentType(MediaType.APPLICATION_JSON).content("""{"reason":"batal"}"""))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.message").exists())
     }
 }

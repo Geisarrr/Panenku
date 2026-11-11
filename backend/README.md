@@ -1344,11 +1344,15 @@ Bagian ini memisahkan **desain target** (isi README di atas) dari **kondisi kode
 | Auth | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me` |
 | Pembeli | `GET /api/v1/buyer/products`, `GET /api/v1/buyer/products/{id}`, `GET /api/v1/buyer/commodities` |
 | Pembeli | `GET/POST/PUT/DELETE /api/v1/buyer/cart...`, `POST /api/v1/buyer/checkout` |
+| Pembeli (F5) | `GET /api/v1/buyer/orders`, `GET /api/v1/buyer/orders/{id}`, `POST /api/v1/buyer/orders/{id}/cancel`, `POST /api/v1/buyer/orders/{id}/receive` |
 | Petani | `GET/POST/PUT/DELETE /api/v1/petani/products...` |
+| Petani (F5) | `GET /api/v1/petani/orders`, `GET /api/v1/petani/orders/{id}`, `PUT /api/v1/petani/orders/{id}/respond`, `PUT /api/v1/petani/orders/{id}/fulfillment` |
 | Admin | `GET/POST/PUT /api/v1/admin/commodities...` |
 | Admin | `PUT /api/v1/admin/farmers/{id}/verify`, `PUT /api/v1/admin/users/{id}/suspend` |
 
-Sisanya (order pembeli/petani, bukti pembayaran, verifikasi pembayaran, fulfillment, review, refund, eskalasi, notifikasi, payment method petani, profil petani, settings limit, audit-log list, dispute admin) masih **direncanakan**.
+Sisanya (bukti pembayaran, verifikasi pembayaran, review, refund, eskalasi, notifikasi, payment method petani, profil petani, settings limit, audit-log list, dispute admin) masih **direncanakan**.
+
+> **Catatan F5:** transisi status mengikuti state machine di README. Pembatalan/penolakan/`gagal_dipenuhi` melepas reservasi stok; transisi ke `menunggu_penerimaan` memenuhi reservasi (mengurangi `stock_reserved` dan `stock_physical`). Perubahan status pemenuhan mensyaratkan `payment_status = 'terverifikasi'`, yang baru bisa dipenuhi setelah endpoint F6 tersedia.
 
 ### Tabel yang sudah ada migrasinya
 
@@ -1373,9 +1377,9 @@ Belum ada migrasi: `payment_submissions`, `reviews`, `refunds`, `notifications` 
 
 ```bash
 # Unit test (tanpa Docker)
-./gradlew test --tests "com.panenku.backend.CheckoutRulesTest" --tests "com.panenku.backend.SchedulerWiringTest"
+./gradlew test --tests "com.panenku.backend.CheckoutRulesTest" --tests "com.panenku.backend.SchedulerWiringTest" --tests "com.panenku.backend.OrderStatusRulesTest"
 
-# Semua test (butuh Docker untuk Testcontainers)
+# Semua test termasuk integrasi F5 (butuh Docker untuk Testcontainers)
 ./gradlew test
 ```
 

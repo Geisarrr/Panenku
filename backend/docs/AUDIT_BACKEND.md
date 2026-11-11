@@ -48,7 +48,7 @@ Docker Desktop Linux engine dan JDK 17 harus tersedia. Testcontainers membuat da
 |---|---|
 | Profil petani, KTP dan metode bayar | Registrasi membuat profil awal; endpoint pengelolaan profil, persetujuan KTP dan QRIS/rekening belum tersedia. Publikasi/checkout aktif menunggu data valid dari modul tersebut. |
 | Auth refresh/logout | Belum tersedia. Access token saat ini berlaku sampai exp; jangan menampilkan kontrak refresh token sebagai fitur aktif. |
-| Pesanan F5 | Checkout dan expiry tersedia. Daftar/detail order, terima/tolak/batal, fulfillment dan konfirmasi penerimaan belum disediakan. Release saat batal/tolak serta pengurangan stok saat fulfillment perlu transaksi yang sesuai. |
+| Pesanan F5 | Sudah tersedia daftar/detail pembeli dan petani, terima/tolak petani, batal pembeli, fulfillment pickup/delivery, `gagal_dipenuhi`, dan konfirmasi penerimaan. Release reservasi terjadi saat batal/tolak/gagal; stok fisik dipenuhi saat transisi ke `menunggu_penerimaan`. Status pemenuhan mensyaratkan pembayaran terverifikasi sehingga alur end-to-end menunggu F6. Test integrasi F5 ada di `CheckoutIntegrationTest` dan butuh Docker. |
 | Pembayaran F6 | Belum ada endpoint unggah/verifikasi bukti atau penerima pembayaran snapshot. Tidak boleh mengklaim pesanan lunas otomatis. |
 | Refund/eskalasi F7 | Belum ada endpoint, tiket, tujuan refund, bukti balik, dan keputusan sengketa. |
 | Storage | Adapter MinIO/S3, validasi isi foto, private access dan signed URL masih perlu diimplementasikan sebelum upload nyata. Photo path pada produk hanya data path yang disediakan modul storage/fixture. |
