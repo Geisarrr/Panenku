@@ -30,8 +30,10 @@ Kami menggunakan **Layered Architecture** dengan pemisahan kode berdasarkan **pe
 ### Alur Permintaan
 
 ```
-Android App → Routes → Controller → Service → Repository → Database
+Android App → Controller → Service → Repository → Database
 ```
+
+> Spring MVC menangani routing lewat anotasi (`@GetMapping`, `@PostMapping`, dll) di Controller, sehingga tidak ada lapisan `Routes` terpisah.
 
 Setiap lapisan hanya boleh berkomunikasi dengan lapisan di bawahnya. Tidak boleh lompat layer.
 
@@ -51,11 +53,14 @@ Setiap lapisan hanya boleh berkomunikasi dengan lapisan di bawahnya. Tidak boleh
 | `common/` | Kode bersama semua role: JWT, exception handling, file storage, validasi decimal, idempotency |
 | `config/` | Konfigurasi environment, database, JWT, server port |
 | `scheduler/` | Background job (misal: kedaluwarsa pesanan 24 jam) |
-| `routes/` | Definisi endpoint API + middleware auth & role guard |
+
+> **Catatan implementasi:** proyek memakai Spring MVC, jadi **tidak ada folder `routes/`**. Mapping URL ditulis lewat anotasi di Controller, sedangkan autentikasi/otorisasi ditangani `config/SecurityConfig.kt` dan `common/security/ActorService.kt`.
 
 ---
 
 ## 📂 Struktur Folder
+
+> **Catatan:** struktur di bawah adalah **rancangan target**. Implementasi saat ini memakai Spring MVC sehingga tidak memiliki folder `routes/` dan memakai `resources/application.properties` (bukan `application.conf`). Perbedaan lain dicatat di bagian **Status Implementasi & Deviasi** di bawah.
 
 ```text
 backend/                              ← ROOT PROJECT (sudah ada)
@@ -171,6 +176,8 @@ Backend harus mengimplementasi aturan berikut:
 ---
 
 ## 🗄️ Skema Database Lengkap
+
+> **Catatan:** skema di bawah adalah **desain target MVP**. Skema yang benar-benar dijalankan saat ini ada di `src/main/resources/db/migration/V1–V4`. Perbedaan antara desain dan implementasi dicatat di bagian **Status Implementasi & Deviasi**.
 
 ### Konsep Umum
 
@@ -1126,6 +1133,8 @@ Content-Type: application/json
 }
 ```
 
+> **Status implementasi:** respons login saat ini baru mengembalikan **access token** berupa string pada field `data`. Refresh token, logout, dan refresh endpoint masih direncanakan (lihat **Status Implementasi & Deviasi**).
+
 ### Checkout (Pembeli)
 
 **Request:**
@@ -1166,6 +1175,8 @@ Content-Type: application/json
   "timestamp": "2026-11-10T10:00:00Z"
 }
 ```
+
+> **Status implementasi:** selain field di atas, checkout saat ini juga mewajibkan `expectedPricePerKg` per item, `expectedDeliveryFee`, `scheduledTimeSlot`, dan `deliveryDistrict` (untuk pengantaran) sebagai konfirmasi harga/ongkir/jadwal.
 
 ### Verifikasi Bukti Pembayaran (Petani)
 
@@ -1251,7 +1262,8 @@ Content-Type: application/json
 
 - Password di-hash dengan **bcrypt** atau **argon2** (minimal 8 karakter).
 - JWT Access Token (short-lived) + Refresh Token (long-lived).
-- Semua endpoint mutatif memvalidasi: **aktor, status sebelumnya, dan kepemilikan data**.
+  > Status saat ini: baru access token yang diimplementasikan; refresh token masih direncanakan.
+- Semua endpoint mutatif memvalidasi: **aktor, status sebelumnya, dan kepemilikan data**. Role dicek ulang ke database lewat `ActorService`, bukan hanya dari klaim token.
 - File upload maksimal 5 MB (JPEG/PNG), disimpan privat (MinIO/S3), diakses lewat signed URL.
 - Audit log untuk setiap tindakan admin (siapa, kapan, aksi apa, target, alasan).
 
@@ -1287,8 +1299,10 @@ docker-compose up -d
 
 # Build dan jalankan aplikasi
 ./gradlew build
-./gradlew run
+./gradlew bootRun
 ```
+
+> `./gradlew run` tidak tersedia karena proyek memakai plugin Spring Boot; gunakan `./gradlew bootRun`. Test integrasi memakai Testcontainers sehingga **Docker harus berjalan** saat menjalankan `./gradlew build` atau `./gradlew test`. Variabel `.env` tidak dibaca otomatis oleh Spring Boot; ekspor variabelnya atau jalankan lewat `docker-compose`.
 
 ### Environment Variable (contoh `.env`)
 
@@ -1296,7 +1310,7 @@ docker-compose up -d
 DB_URL=jdbc:postgresql://localhost:5432/panenku
 DB_USER=panenku
 DB_PASSWORD=panenku
-JWT_SECRET=your-secret-key
+JWT_SECRET=ganti-dengan-secret-minimal-32-byte-utf8
 JWT_EXPIRATION=86400000
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
@@ -1316,6 +1330,54 @@ SERVER_PORT=8080
 | **Tahap 3** | QRIS/bank, bukti pembayaran, verifikasi, status pesanan, ulasan | F4, F5 |
 | **Tahap 4** | Refund, eskalasi, suspend, pengaturan limit | F6, Admin |
 | **Tahap 5** | Integrasi lintas akun, seluruh UAT, penyesuaian desain, demo | Semua |
+
+---
+
+## 🧭 Status Implementasi & Deviasi
+
+Bagian ini memisahkan **desain target** (isi README di atas) dari **kondisi kode saat ini**. Sumber kebenaran skema yang sudah berjalan adalah `src/main/resources/db/migration/V1–V4`, bukan tabel desain di atas.
+
+### Endpoint yang sudah tersedia
+
+| Modul | Endpoint |
+|-------|----------|
+| Auth | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me` |
+| Pembeli | `GET /api/v1/buyer/products`, `GET /api/v1/buyer/products/{id}`, `GET /api/v1/buyer/commodities` |
+| Pembeli | `GET/POST/PUT/DELETE /api/v1/buyer/cart...`, `POST /api/v1/buyer/checkout` |
+| Petani | `GET/POST/PUT/DELETE /api/v1/petani/products...` |
+| Admin | `GET/POST/PUT /api/v1/admin/commodities...` |
+| Admin | `PUT /api/v1/admin/farmers/{id}/verify`, `PUT /api/v1/admin/users/{id}/suspend` |
+
+Sisanya (order pembeli/petani, bukti pembayaran, verifikasi pembayaran, fulfillment, review, refund, eskalasi, notifikasi, payment method petani, profil petani, settings limit, audit-log list, dispute admin) masih **direncanakan**.
+
+### Tabel yang sudah ada migrasinya
+
+`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`.
+
+Belum ada migrasi: `payment_submissions`, `reviews`, `refunds`, `notifications` (target Tahap 3–4).
+
+### Deviasi desain vs implementasi
+
+| Area | Desain README | Implementasi saat ini | Keterangan |
+|------|---------------|------------------------|------------|
+| `settings` | `id UUID`, `setting_key`, `setting_value`, `changed_by`, `changed_at`, `reason` | `key` (PK), `value`, `updated_by`, `updated_at` | Mengikuti Flyway V1. Bila desain awal tetap diinginkan, ubah lewat migrasi baru (mis. V5), jangan edit V1. |
+| `audit_logs` | `old_values`/`new_values` JSONB | `old_values`/`new_values` TEXT | Flyway V4. Nilai aksi memakai kode uppercase, mis. `VERIFY_KTP_APPROVED`, `USER_SUSPENDED`. |
+| `order_status_history.actor_id` | NOT NULL | NULL diperbolehkan untuk `actor_role='system'` | Flyway V3, agar scheduler bisa mencatat kedaluwarsa tanpa impersonasi user. |
+| Login | `accessToken` + `refreshToken` + `user` | `data` berisi access token (string) | Refresh/logout belum ada; data user diambil dari `GET /auth/me`. |
+| Status code | Ada 422 Unprocessable Entity | 400/403/404/409 | 422 belum dipakai; pelanggaran aturan bisnis dikembalikan sebagai 400/403/409. |
+| Tambah produk | Wajib KTP disetujui | `draft` boleh tanpa KTP; publish `aktif` wajib KTP disetujui + metode bayar + foto + stok | Mengikuti aturan bisnis produk aktif. |
+| File storage | Upload KTP/bukti via MinIO | `FileStorage` tersedia, endpoint upload belum | Akan mengembalikan 503 bila konfigurasi MinIO kosong. |
+| Folder | Ada `routes/`, `application.conf` | Spring MVC tanpa `routes/`, memakai `application.properties` | Spring Boot menangani routing via anotasi Controller. |
+
+### Testing
+
+```bash
+# Unit test (tanpa Docker)
+./gradlew test --tests "com.panenku.backend.CheckoutRulesTest" --tests "com.panenku.backend.SchedulerWiringTest"
+
+# Semua test (butuh Docker untuk Testcontainers)
+./gradlew test
+```
 
 ---
 
