@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.*
 import org.springframework.data.repository.query.Param
 import java.util.UUID
 
+interface BuyerProfileRepository : JpaRepository<BuyerProfile, UUID>
+
 interface FarmerProfileRepository : JpaRepository<FarmerProfile, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select f from FarmerProfile f where f.id = :id")

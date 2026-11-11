@@ -1,7 +1,7 @@
 package com.panenku.backend.modules.shared.entity
 
 import jakarta.persistence.*
-import java.time.LocalDateTime
+import java.time.Instant
 import java.util.UUID
 
 @Entity
@@ -25,8 +25,8 @@ class User {
     var status: String = "active" // active, suspended
 
     @Column(name = "created_at")
-    var createdAt: LocalDateTime = LocalDateTime.now()
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at")
-    var updatedAt: LocalDateTime = LocalDateTime.now()
+    var updatedAt: Instant = Instant.now()
 }
