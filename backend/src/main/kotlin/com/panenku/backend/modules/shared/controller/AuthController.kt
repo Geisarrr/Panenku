@@ -6,13 +6,9 @@ import com.panenku.backend.modules.shared.dto.LoginRequest
 import com.panenku.backend.modules.shared.dto.RegisterRequest
 import com.panenku.backend.modules.shared.dto.UserDTO
 import com.panenku.backend.modules.shared.service.AuthService
-import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import org.springframework.security.core.annotation.AuthenticationPrincipal
-import org.springframework.security.oauth2.jwt.Jwt
-import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -21,7 +17,7 @@ class AuthController(
 ) {
 
     @PostMapping("/register")
-    fun register(@Valid @RequestBody request: RegisterRequest): ResponseEntity<ApiResponse<UserDTO>> {
+    fun register(@RequestBody request: RegisterRequest): ResponseEntity<ApiResponse<UserDTO>> {
         val userDTO = authService.register(request)
         return ResponseEntity(
             successResponse(userDTO, "Registrasi berhasil"),
@@ -30,15 +26,11 @@ class AuthController(
     }
 
     @PostMapping("/login")
-    fun login(@Valid @RequestBody request: LoginRequest): ResponseEntity<ApiResponse<String>> {
+    fun login(@RequestBody request: LoginRequest): ResponseEntity<ApiResponse<String>> {
         val token = authService.login(request)
         return ResponseEntity(
             successResponse(token, "Login berhasil"),
             HttpStatus.OK
         )
     }
-
-    @GetMapping("/me")
-    fun me(@AuthenticationPrincipal jwt: Jwt): ApiResponse<UserDTO> =
-        successResponse(authService.me(UUID.fromString(jwt.subject)), "Profil akun")
 }
