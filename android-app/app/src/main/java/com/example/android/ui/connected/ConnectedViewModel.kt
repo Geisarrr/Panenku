@@ -6,6 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.*
 import id.panenku.app.BuildConfig
+import id.panenku.app.ui.auth.RegistrationInput
+import id.panenku.app.ui.auth.OpeningRole
+import id.panenku.app.ui.auth.FarmerOnboardingState
+import id.panenku.app.ui.auth.FarmerVerificationInput
 import id.panenku.app.data.remote.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -21,10 +25,15 @@ data class ConnectedState(
     val proofs: List<JsonObject> = emptyList(), val fulfillment: JsonObject? = null,
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
     val image: ByteArray? = null, val profile: JsonObject? = null,
-    val page: Int = 0, val more: Boolean = false
+    val page: Int = 0, val more: Boolean = false,
+    val farmerOnboarding: FarmerOnboardingState = FarmerOnboardingState()
 )
 class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     private val api = PanenkuApi(BuildConfig.API_BASE_URL)
+    private val enrollment = FarmerEnrollment(api)
+    private var farmerDraft: RegistrationInput? = null
+    private var farmerDummyId = newDummyId()
+    private fun newDummyId() = "DUMMY-" + java.util.UUID.randomUUID().toString().replace("-", "").take(12).uppercase()
     private val prefs = app.getSharedPreferences("request_keys", 0)
     private val keys = RequestKeys({ prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).commit(); Unit }, { prefs.edit().remove(it).commit(); Unit })
     private val mutable = MutableStateFlow(ConnectedState())
@@ -51,6 +60,57 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun register(email: String, password: String, name: String, farmer: Boolean) = run("Akun dibuat. Silakan masuk.") {
         api.register(email, password, name, if (farmer) "petani" else "pembeli")
+    }
+    /** Register with existing API, then create a session and save the profile via existing endpoints. */
+    fun registerAccount(input: RegistrationInput) = run {
+        api.register(input.email, input.password, input.name, input.role.apiValue, input.phone, input.storeName)
+        // Registration can succeed even if login loses the connection: do not falsely report account rollback.
+        val session = try { api.login(input.email, input.password) }
+            catch (e: Exception) {
+                if (e is CancellationException) throw e
+                set { it.copy(error = "Akun sudah dibuat. Silakan masuk dengan email dan kata sandi yang baru didaftarkan.") }
+                return@run
+            }
+        var profileError: String? = null
+        try {
+            api.put("auth/profile", json("fullName" to input.name, "contactPhone" to input.phone,
+                "deliveryAddress" to input.address.takeIf { input.role == OpeningRole.BUYER }))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            profileError = "Akun berhasil dibuat dan masuk. Profil belum lengkap; silakan simpan kembali melalui halaman Akun."
+        }
+        mutable.value = ConnectedState(user = session.user, busy = true, error = profileError)
+    }
+
+    fun prepareFarmerAccount(input: RegistrationInput) {
+        if (state.value.busy || enrollment.accountCreated) return
+        require(input.role == OpeningRole.FARMER)
+        farmerDraft = input
+        farmerDummyId = newDummyId()
+        set { it.copy(farmerOnboarding = FarmerOnboardingState(draftReady = true, email = input.email)) }
+    }
+    fun submitFarmerRegistration(input: FarmerVerificationInput) = run {
+        val account = farmerDraft ?: error("Isi kembali data akun sebelum mengirim verifikasi.")
+        try {
+            enrollment.submit(account.email, account.password, account.name, account.phone,
+                input.storeName, input.location, input.area.split(',').map(String::trim).filter(String::isNotBlank)) {
+                upload("petani/ktp/application", input.photoUri,
+                    mapOf("dummyName" to "DOKUMEN CONTOH", "dummyNik" to farmerDummyId))
+            }
+            // Display waiting only after the backend acknowledges a pending application.
+            farmerDraft = null
+            set { it.copy(farmerOnboarding = FarmerOnboardingState(accountCreated = true, waiting = true, email = account.email)) }
+        } catch (e: Exception) {
+            set { it.copy(farmerOnboarding = it.farmerOnboarding.copy(accountCreated = enrollment.accountCreated)) }
+            throw e
+        }
+    }
+    fun finishFarmerVerification() = run {
+        try { api.logout() }
+        finally {
+            enrollment.clear(); farmerDraft = null
+            set { it.copy(farmerOnboarding = FarmerOnboardingState()) }
+        }
     }
     fun logout() = run {
         try { api.logout() } finally { mutable.value = ConnectedState() }
@@ -94,7 +154,7 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
             "expectedCheckoutToken" to result.text("quoteToken"))
         set { it.copy(quote = result, checkoutBody = body) }
     }
-    private fun key(path: String, payload: String) = keys.key(state.value.user?.id ?: error("Masuk terlebih dahulu."), path, payload)
+    private fun key(path: String, payload: String) = keys.key(state.value.user?.id ?: api.session?.user?.id ?: error("Masuk terlebih dahulu."), path, payload)
     private suspend fun keyedPost(path: String, body: JsonObject): JsonElement {
         val result = api.post(path, body, key(path, body.toString()))
         keys.complete(state.value.user!!.id, path, body.toString())
@@ -158,7 +218,7 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         api.put("petani/orders/$id/payment-verify", json("submissionId" to submission, "decision" to if (accepted) "terima" else "tolak", "reason" to reason))
         detail(id)
     }
-    private suspend fun upload(path: String, uri: String, fields: Map<String, String> = emptyMap(), partName: String = "image") {
+    private suspend fun upload(path: String, uri: String, fields: Map<String, String> = emptyMap(), partName: String = "image"): JsonElement {
         val (bytes, mime) = withContext(Dispatchers.IO) {
             val resolver = getApplication<Application>().contentResolver
             val parsed = Uri.parse(uri)
@@ -173,8 +233,9 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         val payload = json("fields" to fields, "imageHash" to digest).toString()
-        api.upload(path, bytes, mime, fields, key(path, payload), partName)
-        keys.complete(state.value.user!!.id, path, payload)
+        val result = api.upload(path, bytes, mime, fields, key(path, payload), partName)
+        keys.complete(state.value.user?.id ?: api.session!!.user.id, path, payload)
+        return result
     }
     fun proof(id: String, uri: String) = run("Bukti dikirim untuk diperiksa petani.") { upload("buyer/orders/$id/payment-proof", uri); detail(id) }
     fun image(path: String) = run { val image = api.image(path); set { it.copy(image = image) } }

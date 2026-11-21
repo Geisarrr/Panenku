@@ -83,9 +83,10 @@ class PanenkuApi(baseUrl: String, client: OkHttpClient = OkHttpClient.Builder()
         session = result
         return result
     }
-    suspend fun register(email: String, password: String, name: String, role: String) {
+    suspend fun register(email: String, password: String, name: String, role: String, phone: String? = null, storeName: String? = null) {
         unwrap(http.post("auth/register", null, json("email" to email.trim(), "password" to password,
-            "role" to role, "fullName" to name, "storeName" to name.takeIf { role == "petani" })))
+            "role" to role, "fullName" to name, "contactPhone" to phone,
+            "storeName" to (storeName ?: name).takeIf { role == "petani" })))
     }
     suspend fun logout() {
         val current = session

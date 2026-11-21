@@ -22,13 +22,16 @@ import com.google.gson.JsonObject
 import id.panenku.app.R
 import id.panenku.app.data.remote.*
 import id.panenku.app.ui.components.*
+import id.panenku.app.ui.auth.PanenkuOpeningFlow
 
 /** Live entry point. Uses the sliced design system, never Demo*Repository. */
 @Composable
 fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     if (state.user == null) {
-        ConnectedLogin(state, vm)
+        PanenkuOpeningFlow(state.busy, vm::login, vm::registerAccount,
+            farmer = state.farmerOnboarding, onPrepareFarmer = vm::prepareFarmerAccount,
+            onVerifyFarmer = vm::submitFarmerRegistration, onVerificationExit = vm::finishFarmerVerification)
     } else key(state.user!!.id) {
         var screen by rememberSaveable { mutableStateOf(if (state.user!!.role == "admin") "admin" else "catalog") }
         var orderId by rememberSaveable { mutableStateOf("") }
@@ -88,28 +91,5 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
         AlertDialog(onDismissRequest = vm::dismiss, title = { Text("Bukti dari server") },
             text = { if (bitmap != null) Image(bitmap.asImageBitmap(), "Gambar bukti", Modifier.fillMaxWidth().heightIn(max = 450.dp)) else Text("Gambar tidak dapat ditampilkan.") },
             confirmButton = { TextButton(onClick = vm::dismiss) { Text("Tutup") } })
-    }
-}
-
-@Composable private fun ConnectedLogin(state: ConnectedState, vm: ConnectedViewModel) {
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var name by rememberSaveable { mutableStateOf("") }
-    var register by rememberSaveable { mutableStateOf(false) }
-    var farmer by rememberSaveable { mutableStateOf(false) }
-    Page(if (register) "Bergabung dengan Panenku" else "Selamat Datang Kembali!", "Panen segar, langsung dari petani.") {
-        item { Image(painterResource(R.drawable.logo_panenku), "Panenku", Modifier.width(140.dp).height(90.dp)) }
-        item { Panel {
-            if (register) {
-                Field("Nama lengkap / toko", name, { name = it })
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(farmer, { farmer = it }); Text("Daftar sebagai petani") }
-            }
-            Field("Email", email, { email = it }, keyboard = KeyboardType.Email)
-            Field("Kata sandi", password, { password = it }, password = true)
-            PrimaryButton(if (state.busy) "Memproses…" else if (register) "Buat akun" else "Masuk", {
-                if (register) vm.register(email, password, name, farmer) else vm.login(email, password)
-            }, !state.busy && email.isNotBlank() && password.isNotBlank() && (!register || name.isNotBlank()))
-            TextButton(onClick = { register = !register }, enabled = !state.busy) { Text(if (register) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
-        } }
     }
 }
