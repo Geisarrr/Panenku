@@ -8,13 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Ganti implementasi ini dengan repository API/Room; composable tidak perlu berubah. */
 interface PanenkuRepository : F1FarmerOperations, F3FarmerOperations, F5FarmerOperations {
     val data: StateFlow<DashboardData>
     suspend fun load()
 }
-
-/** Data demo hanya di memori. Tidak mengirim pembayaran, verifikasi, atau data identitas. */
 class DemoPanenkuRepository : PanenkuRepository {
     private val mutableData = MutableStateFlow(SampleData.data)
     override val data = mutableData.asStateFlow()
