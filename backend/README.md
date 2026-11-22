@@ -1463,10 +1463,19 @@ Petani mengirim `POST /api/v1/petani/ktp/application` dengan `Idempotency-Key` d
 ```bash
 export PANENKU_DEMO_DATABASE_URL='postgresql://localhost:5432/panenku_demo'
 export PANENKU_DEMO_CONFIRM=YES
+export PANENKU_DEMO_PASSWORD='PanenkuDemo2211!'
 python3 scripts/seed_demo.py
 ```
 
-Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Menjalankannya lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
+Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Dengan perintah contoh di atas, gunakan akun berikut untuk login di lingkungan demo lokal:
+
+| Peran | Email | Kata sandi demo |
+|---|---|---|
+| Pembeli — Mok | `mok@example.test` | `PanenkuDemo2211!` |
+| Petani — Asep Laris | `asep@example.test` | `PanenkuDemo2211!` |
+| Admin Demo | `admin@example.test` | `PanenkuDemo2211!` |
+
+Jika nilai `PANENKU_DEMO_PASSWORD` diubah, ketiga akun memakai nilai baru tersebut. Akun pada tabel ini hanya dibuat oleh `seed_demo.py` di database kosong `panenku_demo`; bukan akun bawaan aplikasi atau akun produksi. Untuk database lokal biasa, `scripts/create-local-admin-mac.sh` hanya membuat `admin@example.test` dan kata sandinya adalah nilai yang diketik saat menjalankan script. Menjalankan seed lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
 
 Checkout tidak memilih metode pembayaran. Backend menyimpan salinan semua metode yang tersedia saat checkout; setelah petani menerima pesanan, pembeli melihat salinan tersebut melalui `GET /orders/{orderId}/payment-options` dan memilih dengan `PUT /orders/{orderId}/payment-destination`, body `{"paymentMethodId":"<id>"}`. Pembeli dapat mengubah pilihan sebelum bukti pertama dikirim. Saat bukti dikirim, tujuan terpilih menjadi snapshot immutable dan tidak dapat diganti, termasuk setelah bukti ditolak. Rekening lengkap dan gambar QRIS hanya tersedia untuk pemilik setelah petani menerima pesanan. QRIS menggunakan penyimpanan lokal privat yang dikonfigurasi melalui `PAYMENT_STORAGE_LOCAL_DIR` (macOS/Linux), bukan MinIO/S3 produksi. Pesanan lama tanpa snapshot tetap tidak memiliki tujuan pembayaran otomatis. Retry checkout lama dengan key dan body lama tetap didukung; field pilihan pembayaran pada checkout baru ditolak agar klien diperbarui.
 
