@@ -1330,7 +1330,13 @@ SERVER_PORT=8080
 
 ### Foto dummy untuk pengembangan
 
-Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh yang dapat digunakan tim saat menguji aplikasi. Skenarionya: **Asep Laris** adalah petani, **Mok** adalah pembeli, dan sawi yang diterima pembeli rusak, sobek, serta tidak segar.
+Untuk mencoba foto produk **tanpa MinIO**, tersedia adapter lokal pengembangan. Set `PRODUCT_PHOTOS_ENABLED=true`, `PRODUCT_PHOTOS_LOCAL_DIR` ke folder privat absolut yang terpisah dari bukti pembayaran, dan `PRODUCT_PHOTOS_LOCAL_BASE_URL=http://127.0.0.1:8080` untuk HP USB dengan `adb reverse tcp:8080 tcp:8080`. Emulator memakai base URL `http://10.0.2.2:8080`. Script `bash scripts/start-local-mac.sh` menyiapkan konfigurasi lokal Mac. Folder fisik tidak disajikan sebagai direktori publik; backend mengembalikan `photoAccessUrl` bertanda tangan yang berlaku 15 menit. Permintaan tanpa tanda tangan valid atau setelah kedaluwarsa ditolak. Gunakan `demo-assets/foto-dummy/produk-sawi-segar.png` lewat endpoint unggah foto F1, lalu publikasikan produk. Tidak ada perubahan skema database atau kontrak upload FE.
+
+Adapter lokal menyimpan kunci berawalan `local-products/`, terpisah dari kunci MinIO `products/`. Berpindah provider tidak memindahkan file lama secara otomatis; unggah ulang foto sebelum publikasi bila provider berubah. Foto lama setelah penggantian tetap tersimpan untuk mempertahankan tautan yang sudah diterbitkan sampai kedaluwarsa; pembersihan file belum otomatis. Storage QRIS/bukti/refund tetap memakai `PAYMENT_STORAGE_LOCAL_DIR`. Tes lokal tanpa MinIO: `./gradlew test --tests com.panenku.backend.LocalProductPhotoIntegrationTest`.
+
+Untuk UAT lokal yang perlu menguji jadwal atau kedaluwarsa tanpa mengubah jam macOS, backend dapat dijalankan dengan `PANENKU_DEV_CLOCK_OFFSET` berupa durasi ISO-8601, misalnya `PT10H`. Nilai bawaan `PT0S` memakai waktu nyata. Opsi ini hanya untuk pengembangan lokal; jangan dipakai pada deployment bersama atau produksi.
+
+Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh yang dapat digunakan tim saat menguji aplikasi. Semua aset pada tabel berikut ikut tersimpan di Git; setelah pull branch `integrasi-api`, pilih file tersebut secara manual dari folder ini saat UI meminta gambar. Skenarionya: **Asep Laris** adalah petani, **Mok** adalah pembeli, dan sawi yang diterima pembeli rusak, sobek, serta tidak segar.
 
 | File | Penggunaan |
 |------|------------|
@@ -1340,6 +1346,7 @@ Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh
 | [bukti-transfer-refund.png](demo-assets/foto-dummy/bukti-transfer-refund.png) | Contoh bukti transfer pengembalian dana dari petani kepada pembeli. |
 | [bukti-transfer-terlambat.png](demo-assets/foto-dummy/bukti-transfer-terlambat.png) | Contoh bukti untuk laporan transfer setelah pesanan kedaluwarsa. |
 | [produk-sawi-segar.png](demo-assets/foto-dummy/produk-sawi-segar.png) | Contoh gambar produk sawi untuk katalog. |
+| [ktp-dummy-asep-laris.png](demo-assets/foto-dummy/ktp-dummy-asep-laris.png) | Ilustrasi dokumen contoh Asep Laris berwatermark DUMMY; bukan identitas resmi atau NIK nyata. |
 
 Semua gambar berformat PNG dan berukuran kurang dari 5 MB. Nilai Rp25.000 pada ilustrasi bukti adalah contoh. Pilih gambar secara manual saat mencoba endpoint upload atau UI yang sudah terhubung; unggah foto produk tersedia melalui penyimpanan F1 tersendiri; lihat `docs/F1_IMPLEMENTATION.md`.
 
