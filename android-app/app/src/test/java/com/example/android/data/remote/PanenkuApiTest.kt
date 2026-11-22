@@ -3,6 +3,7 @@ package id.panenku.app.data.remote
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import com.google.gson.JsonNull
 import org.junit.*
 import org.junit.Assert.*
 
@@ -62,6 +63,23 @@ class PanenkuApiTest {
         assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data"))
         assertEquals("upload-key", request.getHeader("Idempotency-Key"))
         assertTrue(body.contains("name=\"image\"")); assertTrue(body.contains("PANEN")); assertTrue(body.contains("order-id"))
+    }
+    @Test fun multipartPutUsesPutForQrisReplacement() = runBlocking {
+        login(); server.enqueue(response("{}"))
+        api.upload("petani/payment-methods/method-id/qris", byteArrayOf(1, 2, 3), "image/png",
+            mapOf("accountHolderName" to "Asep Laris"), "replace-key", put = true)
+        val request = server.takeRequest()
+        assertEquals("PUT", request.method)
+        assertEquals("/api/v1/petani/payment-methods/method-id/qris", request.path)
+        assertEquals("replace-key", request.getHeader("Idempotency-Key"))
+    }
+    @Test fun explicitJsonNullIsSentForOptimisticSettingsCheck() = runBlocking {
+        login(); server.enqueue(response("{}"))
+        val body = json("newLimit" to 10_000_000L, "csWhatsapp" to "+6280000000000",
+            "expectedTransactionLimit" to 10_000_000L)
+        body.add("expectedCsWhatsapp", JsonNull.INSTANCE)
+        api.put("admin/settings", body)
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"expectedCsWhatsapp\":null"))
     }
     @Test fun logoutHandlesNoContentAndDropsLocalSession() = runBlocking {
         login(); server.enqueue(MockResponse().setResponseCode(204)); api.logout(); assertNull(api.session)

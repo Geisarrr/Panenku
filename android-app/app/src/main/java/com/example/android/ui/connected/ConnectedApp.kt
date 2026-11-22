@@ -38,8 +38,12 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
         var product by remember { mutableStateOf<JsonObject?>(null) }
         val buyer = state.user!!.role == "pembeli"
         val admin = state.user!!.role == "admin"
-        val tabs = if (admin) listOf("admin" to "Verifikasi", "refunds" to "Refund", "account" to "Akun")
-            else listOf("catalog" to if (buyer) "Toko" else "Stok", "orders" to "Pesanan", "refunds" to "Refund", "account" to "Akun")
+        val tabs = if (admin) listOf("admin" to "Verifikasi", "management" to "Kelola", "refunds" to "Refund", "account" to "Akun")
+            else buildList {
+                add("catalog" to if (buyer) "Toko" else "Stok"); add("orders" to "Pesanan"); add("refunds" to "Refund")
+                if (buyer) add("late-payments" to "Bantuan")
+                add("account" to "Akun")
+            }
         fun openOrder(id: String) { orderId = id; screen = "detail" }
         LaunchedEffect(screen) {
             when (screen) {
@@ -50,16 +54,34 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                 "detail" -> vm.order(orderId)
                 "account" -> vm.profile()
                 "admin" -> vm.adminQueue()
+                "commodities" -> vm.adminCommodities()
+                "admin-users" -> vm.adminUsers()
+                "admin-settings" -> vm.adminSettings()
+                "admin-audit" -> vm.auditLogs()
+                "admin-disputes" -> vm.disputes()
+                "admin-late-payments" -> vm.latePayments(true)
+                "late-payments" -> vm.latePayments(false)
                 "product" -> vm.commodities()
                 "checkout" -> vm.invalidateSchedules()
             }
         }
-        BackHandler(screen !in tabs.map { it.first } && !state.busy) { screen = if (screen == "refund-form") "detail" else "catalog" }
+        BackHandler(screen !in tabs.map { it.first } && !state.busy) {
+            screen = when {
+                screen == "refund-form" -> "detail"
+                admin -> "management"
+                else -> "catalog"
+            }
+        }
         Scaffold(bottomBar = {
             NavigationBar {
                 tabs.forEach { (route, label) ->
                     NavigationBarItem(selected = screen == route, onClick = { if (!state.busy) screen = route },
-                        icon = { Icon(when (route) { "catalog" -> Icons.Outlined.Storefront; "orders" -> Icons.Outlined.ReceiptLong; "refunds" -> Icons.Outlined.AssignmentReturn; else -> Icons.Outlined.Person }, label) },
+                        icon = { Icon(when (route) {
+                            "catalog" -> Icons.Outlined.Storefront; "orders" -> Icons.Outlined.ReceiptLong
+                            "refunds" -> Icons.Outlined.AssignmentReturn; "management" -> Icons.Outlined.AdminPanelSettings
+                            "late-payments" -> Icons.Outlined.ReportProblem; "admin" -> Icons.Outlined.VerifiedUser
+                            else -> Icons.Outlined.Person
+                        }, label) },
                         label = { Text(label) })
                 }
             }
@@ -73,9 +95,17 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                     "detail" -> ConnectedOrder(state, vm, buyer, { screen = "orders" }, { screen = "refund-form" })
                     "refund-form" -> ConnectedRefundForm(orderId, vm, { screen = "detail" }) { screen = "refunds" }
                     "refunds" -> ConnectedRefunds(state, vm, buyer, admin)
-                    "product" -> ConnectedProduct(product, state, vm) { screen = "catalog" }
+                    "product" -> ConnectedProduct(product?.let { selected -> state.products.find { it.text("id") == selected.text("id") } ?: selected }, state, vm) { screen = "catalog" }
                     "account" -> ConnectedAccount(state, vm)
                     "admin" -> ConnectedAdmin(state, vm)
+                    "management" -> ConnectedAdminHub { screen = it }
+                    "commodities" -> ConnectedCommodities(state, vm)
+                    "admin-users" -> ConnectedAdminUsers(state, vm) { screen = "management" }
+                    "admin-settings" -> ConnectedAdminSettings(state, vm) { screen = "management" }
+                    "admin-audit" -> ConnectedAdminAudit(state, vm) { screen = "management" }
+                    "admin-disputes" -> ConnectedAdminDisputes(state, vm) { screen = "management" }
+                    "admin-late-payments" -> ConnectedLatePayments(state, vm, true) { screen = "management" }
+                    "late-payments" -> ConnectedLatePayments(state, vm, false)
                 }
                 if (state.busy) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), modifier = Modifier.fillMaxSize().clickable { }) {
                     Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }

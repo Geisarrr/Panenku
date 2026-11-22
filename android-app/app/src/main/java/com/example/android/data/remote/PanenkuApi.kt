@@ -30,13 +30,17 @@ interface PanenkuHttp {
     @Multipart @POST suspend fun upload(@Url path: String, @Header("Authorization") auth: String?,
         @Part image: MultipartBody.Part, @PartMap fields: Map<String, @JvmSuppressWildcards RequestBody>,
         @Header("Idempotency-Key") key: String): Response<ApiEnvelope>
+    @Multipart @PUT suspend fun uploadPut(@Url path: String, @Header("Authorization") auth: String?,
+        @Part image: MultipartBody.Part, @PartMap fields: Map<String, @JvmSuppressWildcards RequestBody>,
+        @Header("Idempotency-Key") key: String): Response<ApiEnvelope>
     @GET suspend fun image(@Url path: String, @Header("Authorization") auth: String?): Response<ResponseBody>
 }
 
 /** Tokens live only in memory: process restart requires login; no plaintext token files or logs. */
 class PanenkuApi(baseUrl: String, client: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()) {
-    private val gson = Gson()
+    // Optimistic-lock contracts use an explicit JSON null to mean “not configured yet”.
+    private val gson = GsonBuilder().serializeNulls().create()
     private val http = Retrofit.Builder().baseUrl(baseUrl).client(client)
         .addConverterFactory(GsonConverterFactory.create(gson)).build().create(PanenkuHttp::class.java)
     @Volatile var session: ApiSession? = null
@@ -97,12 +101,16 @@ class PanenkuApi(baseUrl: String, client: OkHttpClient = OkHttpClient.Builder()
     suspend fun post(path: String, body: JsonObject = json(), key: String? = null) = authorized { http.post(checked(path), auth(), body, key) }
     suspend fun put(path: String, body: JsonObject) = authorized { http.put(checked(path), auth(), body) }
     suspend fun delete(path: String) = authorized { http.delete(checked(path), auth()) }
-    suspend fun upload(path: String, bytes: ByteArray, mime: String, fields: Map<String, String>, key: String, partName: String = "image"): JsonElement {
+    suspend fun upload(path: String, bytes: ByteArray, mime: String, fields: Map<String, String>, key: String,
+        partName: String = "image", put: Boolean = false): JsonElement {
         require(mime in setOf("image/jpeg", "image/png")) { "Gunakan gambar JPEG atau PNG." }
         require(bytes.isNotEmpty() && bytes.size <= 5 * 1024 * 1024) { "Ukuran gambar maksimal 5 MB." }
         val image = MultipartBody.Part.createFormData(partName, if (mime == "image/png") "bukti.png" else "bukti.jpg", bytes.toRequestBody(mime.toMediaType()))
         val parts = fields.mapValues { it.value.toRequestBody("text/plain".toMediaType()) }
-        return authorized { http.upload(checked(path), auth(), image, parts, key) }
+        return authorized {
+            if (put) http.uploadPut(checked(path), auth(), image, parts, key)
+            else http.upload(checked(path), auth(), image, parts, key)
+        }
     }
     suspend fun image(path: String): ByteArray {
         // Refresh uses the same authenticated endpoint before fetching private bytes.

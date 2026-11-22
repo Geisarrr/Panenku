@@ -14,6 +14,8 @@ import id.panenku.app.data.remote.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.security.MessageDigest
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 /** All active screens use this state; legacy SampleData is never copied into it. */
 data class ConnectedState(
@@ -21,6 +23,10 @@ data class ConnectedState(
     val products: List<JsonObject> = emptyList(), val cart: JsonObject = JsonObject(),
     val orders: List<JsonObject> = emptyList(), val refunds: List<JsonObject> = emptyList(),
     val commodities: List<JsonObject> = emptyList(), val detail: JsonObject? = null,
+    val paymentMethods: List<JsonObject> = emptyList(), val paymentMethodDetail: JsonObject? = null,
+    val adminUsers: List<JsonObject> = emptyList(), val adminUserDetail: JsonObject? = null,
+    val settings: JsonObject? = null, val auditLogs: List<JsonObject> = emptyList(),
+    val disputes: List<JsonObject> = emptyList(), val latePayments: List<JsonObject> = emptyList(),
     val options: List<JsonObject> = emptyList(), val destination: JsonObject? = null,
     val proofs: List<JsonObject> = emptyList(), val fulfillment: JsonObject? = null,
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
@@ -218,7 +224,8 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         api.put("petani/orders/$id/payment-verify", json("submissionId" to submission, "decision" to if (accepted) "terima" else "tolak", "reason" to reason))
         detail(id)
     }
-    private suspend fun upload(path: String, uri: String, fields: Map<String, String> = emptyMap(), partName: String = "image"): JsonElement {
+    private suspend fun upload(path: String, uri: String, fields: Map<String, String> = emptyMap(), partName: String = "image",
+        put: Boolean = false): JsonElement {
         val (bytes, mime) = withContext(Dispatchers.IO) {
             val resolver = getApplication<Application>().contentResolver
             val parsed = Uri.parse(uri)
@@ -233,7 +240,7 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
         val payload = json("fields" to fields, "imageHash" to digest).toString()
-        val result = api.upload(path, bytes, mime, fields, key(path, payload), partName)
+        val result = api.upload(path, bytes, mime, fields, key(path, payload), partName, put)
         keys.complete(state.value.user?.id ?: api.session!!.user.id, path, payload)
         return result
     }
@@ -263,11 +270,13 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     fun escalate(id: String, reason: String) = run("Tiket eskalasi dikirim ke admin.") {
         val body = json("reason" to reason); val path = "buyer/refunds/$id/escalations"
         keyedPost(path, body)
+        val rows = api.get("buyer/refunds?size=20").rows(); set { it.copy(refunds = rows) }
     }
     fun invalidateSchedules() = set { it.copy(fulfillment = null, quote = null, checkoutBody = null) }
     fun profile() = run {
         val result = api.get(if (role == "petani") "petani/profile" else "auth/profile").asJsonObject
-        set { it.copy(profile = result) }
+        val methods = if (role == "petani") api.get("petani/payment-methods").rows() else state.value.paymentMethods
+        set { it.copy(profile = result, paymentMethods = methods) }
     }
     fun saveProfile(body: JsonObject) = run("Profil tersimpan.") {
         val result = api.put(if (role == "petani") "petani/profile" else "auth/profile", body).asJsonObject
@@ -276,6 +285,14 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     fun commodities() = run {
         val result = api.get("buyer/commodities").rows(); set { it.copy(commodities = result) }
     }
+    fun adminCommodities() = run {
+        val rows = api.get("admin/commodities").rows(); set { it.copy(commodities = rows) }
+    }
+    fun saveCommodity(id: String?, name: String, active: Boolean, done: () -> Unit) = run("Komoditas tersimpan.") {
+        val body = json("name" to name.trim(), "isActive" to active)
+        if (id == null) api.post("admin/commodities", body) else api.put("admin/commodities/$id", body)
+        val rows = api.get("admin/commodities").rows(); set { it.copy(commodities = rows) }; done()
+    }
     fun saveProduct(id: String?, body: JsonObject, done: () -> Unit) = run("Produk tersimpan.") {
         if (id == null) api.post("petani/products", body) else api.put("petani/products/$id", body)
         done()
@@ -283,10 +300,38 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     fun bank(bank: String, account: String, name: String) = run("Rekening tersimpan.") {
         val body = json("bankName" to bank, "accountNumber" to account, "accountHolderName" to name)
         val path = "petani/payment-methods/bank"
-        keyedPost(path, body)
+        keyedPost(path, body); refreshPaymentMethods()
     }
-    fun adminQueue() = run {
-        val rows = api.get("admin/farmers/verification-queue").rows()
+    private suspend fun refreshPaymentMethods() {
+        val methods = api.get("petani/payment-methods").rows()
+        set { it.copy(paymentMethods = methods) }
+    }
+    fun paymentMethods() = run { refreshPaymentMethods() }
+    fun bankDetail(id: String) = run {
+        val detail = api.get("petani/payment-methods/$id/bank").asJsonObject
+        set { it.copy(paymentMethodDetail = detail) }
+    }
+    fun clearPaymentMethodDetail() = set { it.copy(paymentMethodDetail = null) }
+    fun saveBank(id: String?, bank: String, account: String, name: String, done: () -> Unit) = run("Rekening tersimpan.") {
+        val body = json("bankName" to bank.trim(), "accountNumber" to account.trim(), "accountHolderName" to name.trim())
+        if (id == null) keyedPost("petani/payment-methods/bank", body)
+        else api.put("petani/payment-methods/$id/bank", body)
+        refreshPaymentMethods(); set { it.copy(paymentMethodDetail = null) }; done()
+    }
+    fun deleteBank(id: String) = run("Rekening dihapus dari pembayaran baru.") {
+        api.delete("petani/payment-methods/$id/bank"); refreshPaymentMethods(); set { it.copy(paymentMethodDetail = null) }
+    }
+    fun saveQris(id: String?, holder: String, uri: String, done: () -> Unit) = run("QRIS tersimpan.") {
+        val path = if (id == null) "petani/payment-methods/qris" else "petani/payment-methods/$id/qris"
+        upload(path, uri, mapOf("accountHolderName" to holder.trim()), put = id != null)
+        refreshPaymentMethods(); done()
+    }
+    fun deleteQris(id: String) = run("QRIS dihapus dari pembayaran baru.") {
+        api.delete("petani/payment-methods/$id/qris"); refreshPaymentMethods()
+    }
+    private fun query(value: String) = URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
+    fun adminQueue(status: String = "menunggu", search: String = "") = run {
+        val rows = api.get("admin/farmers/verification-queue?size=50&status=${query(status)}&search=${query(search.trim())}").rows()
         set { it.copy(products = rows) }
     }
     fun verifyFarmer(id: String, approved: Boolean, reason: String) = run("Keputusan verifikasi tersimpan.") {
@@ -294,8 +339,76 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         val rows = api.get("admin/farmers/verification-queue").rows(); set { it.copy(products = rows) }
     }
 
+    fun adminUsers(role: String? = null, status: String? = null, search: String = "") = run {
+        val filters = buildList {
+            add("size=50")
+            role?.takeIf(String::isNotBlank)?.let { add("role=${query(it)}") }
+            status?.takeIf(String::isNotBlank)?.let { add("status=${query(it)}") }
+            if (search.isNotBlank()) add("search=${query(search.trim())}")
+        }.joinToString("&")
+        val rows = api.get("admin/users?$filters").rows()
+        set { it.copy(adminUsers = rows, adminUserDetail = null) }
+    }
+    fun adminUser(id: String) = run {
+        val detail = api.get("admin/users/$id").asJsonObject
+        set { it.copy(adminUserDetail = detail) }
+    }
+    fun suspendUser(id: String, suspend: Boolean, reason: String) = run(if (suspend) "Akun ditangguhkan." else "Akun dipulihkan.") {
+        api.put("admin/users/$id/suspend", json("suspend" to suspend, "reason" to reason.trim().takeIf(String::isNotBlank)))
+        val detail = api.get("admin/users/$id").asJsonObject
+        val users = api.get("admin/users?size=50").rows()
+        set { it.copy(adminUserDetail = detail, adminUsers = users) }
+    }
+    fun adminSettings() = run {
+        val settings = api.get("admin/settings").asJsonObject
+        set { it.copy(settings = settings) }
+    }
+    fun saveAdminSettings(limit: Long, whatsapp: String, reason: String) = run("Pengaturan admin tersimpan.") {
+        val current = state.value.settings ?: error("Muat pengaturan terlebih dahulu.")
+        val body = json(
+            "newLimit" to limit, "csWhatsapp" to whatsapp.trim(),
+            "expectedTransactionLimit" to current.long("transactionLimit"),
+            "reason" to reason.trim().takeIf(String::isNotBlank)
+        )
+        body.add("expectedCsWhatsapp", current.get("csWhatsapp") ?: JsonNull.INSTANCE)
+        val settings = api.put("admin/settings", body).asJsonObject
+        set { it.copy(settings = settings) }
+    }
+    fun auditLogs(action: String = "") = run {
+        val suffix = action.trim().takeIf(String::isNotBlank)?.let { "&action=${query(it)}" }.orEmpty()
+        val rows = api.get("admin/audit-logs?size=50$suffix").rows()
+        set { it.copy(auditLogs = rows) }
+    }
+    fun disputes() = run {
+        val rows = api.get("admin/disputes?size=50").rows()
+        set { it.copy(disputes = rows) }
+    }
+    fun decideDispute(id: String, approve: Boolean, reason: String) = run("Keputusan sengketa tersimpan.") {
+        api.put("admin/disputes/$id/decide", json("decision" to if (approve) "setujui_refund" else "tutup_sengketa", "reason" to reason.trim()))
+        val rows = api.get("admin/disputes?size=50").rows(); set { it.copy(disputes = rows) }
+    }
+    fun latePayments(admin: Boolean) = run {
+        val prefix = if (admin) "admin" else "buyer"
+        val rows = api.get("$prefix/late-payment-reports?size=50").rows()
+        set { it.copy(latePayments = rows) }
+    }
+    fun reportLatePayment(orderId: String, reason: String, amount: Long, uri: String) = run("Laporan pembayaran terlambat dikirim.") {
+        upload("buyer/late-payment-reports", uri, mapOf("orderId" to orderId, "reason" to reason.trim(), "claimedAmount" to amount.toString()))
+        val rows = api.get("buyer/late-payment-reports?size=50").rows(); set { it.copy(latePayments = rows) }
+    }
+    fun reviewLatePayment(id: String, followUp: Boolean, reason: String) = run("Pemeriksaan laporan tersimpan.") {
+        api.put("admin/late-payment-reports/$id/review", json("decision" to if (followUp) "tindak_lanjut" else "bukti_tidak_cukup", "reason" to reason.trim()))
+        val rows = api.get("admin/late-payment-reports?size=50").rows(); set { it.copy(latePayments = rows) }
+    }
+    fun closeLatePayment(id: String, reason: String) = run("Laporan ditutup.") {
+        api.put("admin/late-payment-reports/$id/close", json("reason" to reason.trim()))
+        val rows = api.get("admin/late-payment-reports?size=50").rows(); set { it.copy(latePayments = rows) }
+    }
+
     fun productPhoto(id: String, uri: String) = run("Foto produk tersimpan.") {
         upload("petani/products/$id/photo", uri, partName = "file")
+        val updated = api.get("petani/products/$id").asJsonObject
+        set { it.copy(products = it.products.map { product -> if (product.text("id") == id) updated else product }) }
     }
     fun ktp(name: String, nik: String, uri: String) = run("Dokumen pengembangan dikirim untuk verifikasi.") {
         upload("petani/ktp/application", uri, mapOf("dummyName" to name, "dummyNik" to nik))

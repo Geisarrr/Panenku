@@ -51,7 +51,7 @@ import id.panenku.app.ui.components.*
     Page("Akun", s.user?.email.orEmpty()) {
         item { Text("Peran: ${s.user?.role}"); SecondaryButton("Perbarui profil", vm::profile) }
         s.profile?.let { p -> item { key(p.toString()) { ProfileForm(p, farmer, admin, vm) } } }
-        if (farmer) { item { BankForm(vm) }; item { KtpForm(vm) } }
+        if (farmer) { item { PaymentMethods(s, vm) }; item { KtpForm(vm) } }
         item { SecondaryButton("Keluar", vm::logout) }
     }
 }
@@ -83,28 +83,96 @@ import id.panenku.app.ui.components.*
         }, name.isNotBlank() && (!farmer || fee.toLongOrNull() != null))
     }
 }
-@Composable private fun BankForm(vm: ConnectedViewModel) {
+@Composable private fun PaymentMethods(s: ConnectedState, vm: ConnectedViewModel) {
+    var bankId by rememberSaveable { mutableStateOf<String?>(null) }
     var bank by rememberSaveable { mutableStateOf("") }
     var account by rememberSaveable { mutableStateOf("") }
-    var name by rememberSaveable { mutableStateOf("") }
-    Panel("Tambah rekening toko") {
-        Field("Nama bank", bank, { bank = it }); Field("Nomor rekening", account, { account = it }); Field("Pemilik rekening", name, { name = it })
-        PrimaryButton("Simpan rekening", { vm.bank(bank, account, name) }, bank.isNotBlank() && account.isNotBlank() && name.isNotBlank())
+    var bankHolder by rememberSaveable { mutableStateOf("") }
+    var qrisId by rememberSaveable { mutableStateOf<String?>(null) }
+    var qrisHolder by rememberSaveable { mutableStateOf("") }
+    var qrisImage by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    LaunchedEffect(bankId, s.paymentMethodDetail?.toString()) {
+        val detail = s.paymentMethodDetail
+        if (bankId != null && detail?.text("id") == bankId) detail?.let {
+            bank = it.text("bankName")
+            account = it.text("accountNumber")
+            bankHolder = it.text("accountHolderName")
+        }
     }
+    fun clearBank() { bankId = null; bank = ""; account = ""; bankHolder = ""; vm.clearPaymentMethodDetail() }
+    fun clearQris() { qrisId = null; qrisHolder = ""; qrisImage = null }
+
+    Panel("Metode pembayaran toko") {
+        SecondaryButton("Muat ulang metode pembayaran", vm::paymentMethods)
+        if (s.paymentMethods.isEmpty() && !s.busy) Text("Belum ada rekening atau QRIS.")
+        s.paymentMethods.forEach { method ->
+            val id = method.text("id")
+            if (method.text("methodType") == "bank_transfer") {
+                Text("${method.text("bankName")} · ••••${method.text("accountNumberLast4")} · ${method.text("accountHolderName")}")
+                Row {
+                    TextButton(onClick = { bankId = id; vm.bankDetail(id) }) { Text("Edit rekening") }
+                    TextButton(onClick = { deleteTarget = "bank" to id }) { Text("Hapus") }
+                }
+            } else {
+                Text("QRIS · ${method.text("accountHolderName")}")
+                SecondaryButton("Lihat QRIS", { vm.image("petani/payment-methods/$id/qris") })
+                PrimaryButton("Ganti QRIS", {
+                    qrisId = id
+                    qrisHolder = method.text("accountHolderName")
+                    qrisImage = null
+                })
+                TextButton(onClick = { deleteTarget = "qris" to id }) { Text("Hapus QRIS") }
+            }
+        }
+
+        Text(if (bankId == null) "Tambah rekening" else "Edit rekening")
+        Field("Nama bank", bank, { bank = it.take(100) })
+        Field("Nomor rekening", account, { account = it.filter(Char::isDigit).take(50) })
+        Field("Pemilik rekening", bankHolder, { bankHolder = it.take(255) })
+        PrimaryButton("Simpan rekening", { vm.saveBank(bankId, bank, account, bankHolder, ::clearBank) },
+            bank.isNotBlank() && account.isNotBlank() && bankHolder.isNotBlank() && !s.busy)
+        if (bankId != null) SecondaryButton("Batal edit rekening", ::clearBank)
+
+        Text(if (qrisId == null) "Tambah QRIS" else "Ganti QRIS terpilih")
+        Field("Nama penerima QRIS", qrisHolder, { qrisHolder = it.take(255) })
+        MediaPicker("Gambar QRIS (JPEG/PNG, maks. 5 MB)", qrisImage, { qrisImage = it })
+        PrimaryButton("Simpan QRIS", { qrisImage?.let { vm.saveQris(qrisId, qrisHolder, it, ::clearQris) } },
+            qrisHolder.isNotBlank() && qrisImage != null && !s.busy)
+        if (qrisId != null) SecondaryButton("Batal ganti QRIS", ::clearQris)
+        Text("Perubahan hanya berlaku untuk checkout baru. Snapshot pesanan lama tidak berubah.")
+    }
+    deleteTarget?.let { (type, id) -> AlertDialog(onDismissRequest = { deleteTarget = null },
+        title = { Text("Hapus metode pembayaran?") },
+        text = { Text("Metode tidak tersedia untuk checkout baru. Pesanan lama tetap memakai snapshot sebelumnya.") },
+        confirmButton = { TextButton(onClick = { deleteTarget = null; if (type == "bank") vm.deleteBank(id) else vm.deleteQris(id) }) { Text("Hapus") } },
+        dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Batal") } }) }
 }
 @Composable internal fun ConnectedAdmin(s: ConnectedState, vm: ConnectedViewModel) {
+    var search by rememberSaveable { mutableStateOf("") }
+    var status by rememberSaveable { mutableStateOf("menunggu") }
     Page("Verifikasi petani", admin = true) {
-        item { SecondaryButton("Perbarui antrean", vm::adminQueue) }
-        if (s.products.isEmpty() && !s.busy) item { Text("Tidak ada pengajuan menunggu pada halaman ini.") }
+        item { Panel("Cari pengajuan") {
+            Field("Cari toko, email, atau ID", search, { search = it.take(100) })
+            Row { listOf("menunggu" to "Menunggu", "disetujui" to "Disetujui", "ditolak" to "Ditolak").forEach { (value, label) ->
+                FilterChip(status == value, { status = value }, { Text(label) })
+            } }
+            PrimaryButton("Terapkan filter", { vm.adminQueue(status, search) })
+        } }
+        if (s.products.isEmpty() && !s.busy) item { Text("Tidak ada pengajuan yang sesuai filter.") }
         items(s.products) { farmer ->
             var reason by rememberSaveable(farmer.text("farmerId")) { mutableStateOf("") }
             Panel(farmer.text("storeName")) {
                 Text(farmer.text("email"))
+                Text("KTP: ${farmer.text("ktpStatus")} · akun ${farmer.text("accountStatus")}")
                 val id = farmer.text("farmerId").ifBlank { farmer.text("id") }
-                SecondaryButton("Lihat dokumen pengembangan", { vm.image("admin/farmers/$id/ktp-document") })
-                Field("Alasan penolakan", reason, { reason = it })
-                PrimaryButton("Setujui petani", { vm.verifyFarmer(id, true, reason) })
-                SecondaryButton("Tolak pengajuan", { vm.verifyFarmer(id, false, reason) }, enabled = reason.isNotBlank())
+                if (farmer.flag("hasDocument")) SecondaryButton("Lihat dokumen pengembangan", { vm.image("admin/farmers/$id/ktp-document") })
+                if (farmer.text("ktpStatus") == "menunggu") {
+                    Field("Alasan penolakan", reason, { reason = it.take(1000) })
+                    PrimaryButton("Setujui petani", { vm.verifyFarmer(id, true, reason) })
+                    SecondaryButton("Tolak pengajuan", { vm.verifyFarmer(id, false, reason) }, enabled = reason.isNotBlank())
+                }
             }
         }
     }
@@ -120,5 +188,31 @@ import id.panenku.app.ui.components.*
         Field("NIK dummy", nik, { nik = it }, "DUMMY-0001")
         MediaPicker("Gambar dokumen contoh", image, { image = it })
         PrimaryButton("Kirim dokumen contoh", { image?.let { vm.ktp(name, nik, it) } }, name.isNotBlank() && nik.isNotBlank() && image != null)
+    }
+}
+
+@Composable internal fun ConnectedCommodities(s: ConnectedState, vm: ConnectedViewModel) {
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var active by rememberSaveable { mutableStateOf(true) }
+    Page("Kelola komoditas", admin = true) {
+        item { SecondaryButton("Muat ulang komoditas", vm::adminCommodities) }
+        item { Panel(if (selected == null) "Tambah komoditas" else "Edit komoditas") {
+            Field("Nama komoditas", name, { name = it.take(100) })
+            Row { Checkbox(active, { active = it }); Text("Komoditas aktif") }
+            PrimaryButton("Simpan komoditas", {
+                vm.saveCommodity(selected, name, active) { selected = null; name = ""; active = true }
+            }, name.isNotBlank() && !s.busy)
+            if (selected != null) SecondaryButton("Batal edit", { selected = null; name = ""; active = true })
+        } }
+        if (s.commodities.isEmpty() && !s.busy) item { Text("Belum ada komoditas.") }
+        items(s.commodities, key = { it.text("id") }) { commodity ->
+            Panel(commodity.text("name")) {
+                Text(if (commodity.flag("isActive")) "Aktif" else "Nonaktif")
+                SecondaryButton("Edit ${commodity.text("name")}", {
+                    selected = commodity.text("id"); name = commodity.text("name"); active = commodity.flag("isActive")
+                })
+            }
+        }
     }
 }
