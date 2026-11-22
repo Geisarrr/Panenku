@@ -23,12 +23,19 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.web.SecurityFilterChain
 import javax.crypto.spec.SecretKeySpec
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 @Configuration
 class SecurityConfig {
-    @Bean fun clock(): Clock = Clock.systemUTC()
+    /** Local-only test aid. The default preserves real UTC time in every environment. */
+    @Bean
+    fun clock(@Value("\${panenku.dev-clock-offset:PT0S}") offsetText: String): Clock {
+        val offset = try { Duration.parse(offsetText) }
+        catch (_: Exception) { throw IllegalArgumentException("PANENKU_DEV_CLOCK_OFFSET harus durasi ISO-8601, misalnya PT0S atau PT10H.") }
+        return Clock.offset(Clock.systemUTC(), offset)
+    }
 
     @Bean
     fun jwtDecoder(@Value("\${panenku.jwt.secret}") secret: String, @Value("\${panenku.jwt.issuer}") issuer: String, clock: Clock): JwtDecoder {
@@ -58,6 +65,7 @@ class SecurityConfig {
         return http.csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                it.requestMatchers(HttpMethod.GET, "/api/v1/product-photos/local").permitAll()
                 it.requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/sessions", "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/v1/buyer/products", "/api/v1/buyer/products/*", "/api/v1/buyer/commodities").permitAll()
                     .anyRequest().authenticated()
