@@ -273,6 +273,10 @@ fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegis
 
 @Composable fun OpeningLoginScreen(busy: Boolean, onLogin: (String, String) -> Unit, onRegister: () -> Unit,
     onBack: () -> Unit, role: OpeningRole = OpeningRole.BUYER) {
+    if (role == OpeningRole.FARMER) {
+        SellerLoginScreen(busy, onLogin, onRegister)
+        return
+    }
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var info by remember { mutableStateOf<String?>(null) }
@@ -336,6 +340,10 @@ fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegis
 
 @Composable fun OpeningRegistrationScreen(role: OpeningRole, busy: Boolean, onRegister: (RegistrationInput) -> Unit,
     onLogin: () -> Unit, onBack: () -> Unit) {
+    if (role == OpeningRole.FARMER) {
+        SellerRegistrationScreen(busy, onRegister, onLogin, onBack)
+        return
+    }
     var name by rememberSaveable { mutableStateOf("") }
     var phone by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }

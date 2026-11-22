@@ -18,6 +18,8 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import id.panenku.app.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -29,7 +31,6 @@ import id.panenku.app.ui.theme.PanenkuColors
     onLogin: () -> Unit, onBack: () -> Unit, accountCreated: Boolean = false) {
     var store by rememberSaveable { mutableStateOf("") }
     var location by rememberSaveable { mutableStateOf("") }
-    var area by rememberSaveable { mutableStateOf("") }
     var photo by rememberSaveable { mutableStateOf<String?>(null) }
     var filename by rememberSaveable { mutableStateOf("") }
     var fileError by remember { mutableStateOf<String?>(null) }
@@ -53,39 +54,37 @@ import id.panenku.app.ui.theme.PanenkuColors
             } catch (e: Exception) { fileError = e.message ?: "Gambar belum dapat dibaca." }
         }
     }
-    OpeningLayout {
-        OpeningStep(3, onBack, busy, total = 3)
+    SellerLayout(inset = 23.dp) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Spacer(Modifier.height(22.dp))
-            Text("Verifikasi petani", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF398D2D))
-            Spacer(Modifier.height(14.dp))
-            Text("Verifikasi identitas dan toko", fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, color = OpeningForest)
-            Spacer(Modifier.height(8.dp))
-            Text("Produk hanya dapat diterbitkan setelah identitas petani disetujui admin.", fontSize = 12.sp, lineHeight = 17.sp, color = PanenkuColors.Muted)
-            Spacer(Modifier.height(30.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OpeningInput("Nama toko tani", store, { store = it.take(255) }, "Contoh: Kebun Pak Darto", enabled = !busy)
-                OpeningInput("Lokasi toko", location, { location = it.take(2000) }, "Kecamatan, kota/kabupaten", enabled = !busy)
-                OpeningInput("Area pengantaran", area, { area = it.take(2000) }, "Contoh: Lowokwaru, Blimbing", enabled = !busy)
+            SellerStep(3, onBack, busy)
+            SellerHeading("Verifikasi petani", "Verifikasi identitas dan toko",
+                "Produk hanya dapat diterbitkan setelah identitas petani disetujui admin.")
+            Column(verticalArrangement = Arrangement.spacedBy(13.5.dp)) {
+                SellerInput("Nama toko tani", store, { store = it.take(255) }, "Contoh: Kebun Pak Darto", enabled = !busy)
+                SellerInput("Lokasi toko", location, { location = it.take(2000) }, "Kecamatan, kota/kabupaten", enabled = !busy)
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             VerificationDocumentCard(photo != null, filename, !busy) { picker.launch(arrayOf("image/jpeg", "image/png")) }
-            if (fileError != null) Text(fileError!!, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-            Spacer(Modifier.height(14.dp))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFFFFF5E7)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("Proses verifikasi", color = Color(0xFF92541B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (accountCreated) "Akun sudah dibuat. Lengkapi pengajuan yang belum terkirim." else "Admin akan memeriksa data Anda.",
-                    color = Color(0xFFA46C37), fontSize = 10.sp, lineHeight = 15.sp)
+            if (fileError != null) SellerText(fileError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp))
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.5.dp)).background(Color(0xFFFFF6E9)).padding(10.2.dp),
+                verticalArrangement = Arrangement.spacedBy(4.3.dp)) {
+                SellerText("Proses verifikasi", 10.2f, true, Color(0xFF8A551E))
+                SellerText(if (accountCreated) "Akun sudah dibuat. Lengkapi pengajuan yang belum terkirim." else "Admin akan memeriksa data Anda",
+                    8.5f, color = Color(0xFF8A551E))
             }
-            Spacer(Modifier.height(20.dp))
-            OpeningAction("Kirim Pendaftaran Petani", store.isNotBlank() && location.isNotBlank() && area.isNotBlank() && photo != null, busy) {
-                onSubmit(FarmerVerificationInput(store.trim(), location.trim(), area.trim(), photo!!))
+            Spacer(Modifier.height(14.5.dp))
+            SellerAction("Kirim Pendaftaran Petani", busy = busy, labelSize = 11.93f) {
+                if (store.isBlank() || location.isBlank() || photo == null) {
+                    fileError = "Lengkapi data toko dan pilih foto dokumen terlebih dahulu."
+                } else {
+                    fileError = null
+                    onSubmit(FarmerVerificationInput(store.trim(), location.trim(), "", photo!!))
+                }
             }
             Spacer(Modifier.height(24.dp))
         }
-        OpeningFooter("Sudah memiliki akun?", "Masuk", !busy, onLogin)
-        Spacer(Modifier.height(14.dp))
+        SellerFooter("Sudah memiliki akun?", "Masuk", busy, onLogin)
     }
 }
 
@@ -96,63 +95,51 @@ import id.panenku.app.ui.theme.PanenkuColors
             drawRoundRect(Color(0xFFBCC9B7), cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
                 style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
         }
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(10.2.dp), verticalArrangement = Arrangement.spacedBy(9.4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(OpeningMint), contentAlignment = Alignment.Center) {
-                    Icon(if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.PhotoCamera, null, Modifier.size(21.dp), tint = Color(0xFF36902D))
+                Box(Modifier.size(36.7.dp).clip(RoundedCornerShape(9.4.dp)).background(Color(0xFFE7F5E5)), contentAlignment = Alignment.Center) {
+                    Image(painterResource(R.drawable.seller_camera), null, Modifier.size(18.dp))
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Unggah foto KTP", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF3A443A))
-                    Text("Gunakan dokumen contoh. JPG/PNG maks. 5 MB.", fontSize = 10.sp, lineHeight = 14.sp, color = PanenkuColors.Muted)
+                Spacer(Modifier.width(9.4.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.4.dp)) {
+                    SellerText("Unggah foto KTP", 11.93f, true, Color(0xFF404040))
+                    SellerText("Gunakan dokumen contoh. JPG/PNG maks. 5 MB.", 10.2f)
                 }
             }
-            Text(if (selected) filename else "Pilih foto", fontSize = 11.sp, color = if (selected) OpeningForest else Color(0xFF8B978B),
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White).padding(10.dp))
+            Box(Modifier.fillMaxWidth().heightIn(min = 27.7.dp).clip(RoundedCornerShape(9.4.dp)).background(Color.White)
+                .padding(horizontal = 9.dp, vertical = 6.dp)) {
+                SellerText(if (selected) filename else "Pilih foto", 10.2f)
+            }
         }
     }
 }
 
 @Composable fun OpeningWaitingScreen(busy: Boolean, onLogin: () -> Unit) {
-    OpeningLayout {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 72.dp, bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Verifikasi petani", color = Color(0xFF467D31), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    SellerLayout(inset = 24.dp) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 54.dp, bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            SellerText("Verifikasi petani", 13f, true, Color(0xFF477B35), line = 16f)
             Spacer(Modifier.height(34.dp))
-            Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.fillMaxSize()) {
-                    drawCircle(Color(0xFFEDF5E7)); drawCircle(Color(0xFFE0EED6), radius = size.minDimension * 0.40f)
-                    drawCircle(Color.White, radius = size.minDimension * 0.29f)
-                    drawCircle(Color(0xFFA5C991), radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width * 0.92f, size.height * 0.14f))
-                    drawCircle(Color(0xFFA5C991), radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width * 0.14f, size.height * 0.86f))
-                }
-                Box(Modifier.size(64.dp)) {
-                    Icon(Icons.Outlined.Description, null, Modifier.size(49.dp).align(Alignment.TopStart), tint = Color(0xFF4B8337))
-                    Icon(Icons.Outlined.Schedule, null, Modifier.size(28.dp).align(Alignment.BottomEnd).background(Color.White, CircleShape), tint = Color(0xFF4B8337))
-                }
-            }
-            Spacer(Modifier.height(28.dp))
-            Text("Menunggu verifikasi", color = Color(0xFF243B22), fontWeight = FontWeight.Bold, fontSize = 27.sp, lineHeight = 35.sp, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(16.dp))
-            Text("Pengajuan Anda sudah diterima. Admin Panenku sedang memeriksa data identitas dan toko Anda.", fontSize = 14.sp,
-                lineHeight = 22.sp, color = Color(0xFF697267), textAlign = TextAlign.Center)
+            Image(painterResource(R.drawable.seller_waiting), null, Modifier.size(132.dp))
+            Spacer(Modifier.height(21.dp))
+            SellerText("Menunggu verifikasi", 27f, true, Color(0xFF20351F), line = 33f, align = TextAlign.Center)
+            Spacer(Modifier.height(13.dp))
+            SellerText("Pengajuan Anda sudah diterima. Admin Panenku sedang memeriksa data identitas dan toko Anda.",
+                14f, color = Color(0xFF515B50), line = 22f, align = TextAlign.Center)
             Spacer(Modifier.height(38.dp))
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF0F7EB))
-                .border(1.dp, Color(0xFFE1ECD9), RoundedCornerShape(14.dp)).padding(16.dp), verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFE1EED6)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Email, null, Modifier.size(21.dp), tint = Color(0xFF4A7E34))
-                }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(Color(0xFFF0F7EB))
+                .border(1.dp, Color(0xFFE1ECD9), RoundedCornerShape(11.dp)).heightIn(min = 108.dp).padding(15.dp),
+                verticalAlignment = Alignment.Top) {
+                Image(painterResource(R.drawable.seller_mail), null, Modifier.size(38.dp))
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("Pemberitahuan lewat email", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF294126))
-                    Text("Gunakan email yang didaftarkan untuk masuk kembali dan memeriksa status pengajuan.", fontSize = 12.sp,
-                        lineHeight = 17.sp, color = Color(0xFF66745F))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SellerText("Pemberitahuan lewat email", 13.3f, true, Color(0xFF20351F))
+                    SellerText("Gunakan email yang didaftarkan untuk masuk kembali dan memeriksa status pengajuan.",
+                        12.36f, color = Color(0xFF515B50), line = 15.5f)
                 }
             }
-            Spacer(Modifier.height(26.dp))
-            Button(onClick = onLogin, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A7F32))) {
-                Text("Kembali ke halaman masuk", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
+            Spacer(Modifier.height(24.dp))
+            SellerAction("Kembali ke halaman masuk", busy = busy, dark = true, onClick = onLogin)
         }
     }
 }

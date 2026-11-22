@@ -14,10 +14,14 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class ConnectedAppTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
-    @Test fun startsAtRealLoginAndDoesNotOfferDemoAccess() {
+    @Test fun opensSellerLoginThroughRoleSelectionWithoutDemoAccess() {
         compose.setContent { PanenkuTheme { ConnectedPanenkuApp() } }
+        compose.mainClock.advanceTimeBy(3000)
+        compose.onNodeWithTag("role-petani").performClick()
+        compose.onNodeWithText("Sudah memiliki akun? Masuk").performClick()
         compose.onNodeWithText("Selamat Datang Kembali!").assertExists()
-        compose.onNodeWithText("Masuk").assertIsNotEnabled()
+        compose.onNodeWithTag("input-Email atau nomor HP").assertExists()
+        compose.onNodeWithText("Masuk").assertIsEnabled()
         compose.onNodeWithText("Mode demo").assertDoesNotExist()
     }
 }
