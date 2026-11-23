@@ -41,7 +41,9 @@ import id.panenku.app.ui.components.*
 @Composable internal fun ConnectedCart(s: ConnectedState, vm: ConnectedViewModel, back: () -> Unit, checkout: () -> Unit) {
     Page("Keranjang", onBack = back) {
         item { SecondaryButton("Muat ulang keranjang", vm::cart) }
-        if (s.cart.list("items").isEmpty() && !s.busy) item { Text("Keranjangmu masih kosong.") }
+        if (s.busy) item { Text("Memuat keranjang…"); LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        s.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
+        if (s.cart.list("items").isEmpty() && !s.busy && s.error == null) item { Text("Keranjangmu masih kosong.") }
         items(s.cart.list("items"), key = { it.text("id") }) { p ->
             var quantity by rememberSaveable(p.text("id"), p.text("quantityKg")) { mutableStateOf(p.text("quantityKg")) }
             Panel(p.text("name")) {
@@ -53,7 +55,7 @@ import id.panenku.app.ui.components.*
             }
         }
         if (s.cart.list("items").isNotEmpty()) item {
-            PrimaryButton("Lanjut checkout", checkout, !s.cart.flag("hasUnavailableItems"))
+            PrimaryButton("Lanjut checkout", checkout, !s.busy && !s.cart.flag("hasUnavailableItems"))
         }
     }
 }
@@ -68,16 +70,23 @@ import id.panenku.app.ui.components.*
             Row {
                 FilterChip(method == "pickup", { method = "pickup"; date = ""; slot = ""; vm.invalidateSchedules() }, { Text("Ambil sendiri") })
                 Spacer(Modifier.width(8.dp))
-                FilterChip(method == "delivery", { method = "delivery"; date = ""; slot = ""; vm.invalidateSchedules() }, { Text("Antar") })
+                FilterChip(method == "delivery", { method = "delivery"; date = ""; slot = ""; vm.invalidateSchedules() }, { Text("Antar") }, enabled = s.shippingEnabled && s.deliveryAreas.isNotEmpty())
             }
             if (method == "delivery") {
-                Field("Kecamatan", district, { district = it; date = ""; slot = ""; vm.invalidateSchedules() })
+                Text("Kecamatan layanan toko")
+                s.deliveryAreas.forEach { area ->
+                    FilterChip(district == area, { district = area; date = ""; slot = ""; vm.invalidateSchedules() }, { Text(area) })
+                }
                 Field("Alamat lengkap", address, { address = it; vm.clearQuote() }, multiline = true)
             }
             PrimaryButton("Cari jadwal tersedia", { date = ""; slot = ""; vm.schedules(method, district) }, method == "pickup" || district.isNotBlank())
         } }
         s.fulfillment?.let { options ->
-            item { Text("Lokasi pengambilan: ${options.text("pickupLocation")}") }
+            item {
+                Text("Zona waktu: ${options.text("timeZone")}")
+                Text("Lokasi pengambilan: ${options.text("pickupLocation")}")
+                if (options.list("dates").all { it.getAsJsonArray("timeSlots")?.size() == 0 }) Text("Belum ada jadwal tersedia. Muat ulang pilihan dari toko.")
+            }
             items(options.list("dates")) { day ->
                 Panel(day.text("date")) {
                     day.getAsJsonArray("timeSlots")?.forEach { value ->
@@ -88,12 +97,29 @@ import id.panenku.app.ui.components.*
             }
         }
         if (date.isNotBlank()) item { PrimaryButton("Periksa total", { vm.preview(method, district, address, date, slot) }, method == "pickup" || address.isNotBlank()) }
-        s.quote?.let { quote -> item { Panel("Ringkasan pembayaran") {
-            Text("Produk: ${rupiah(quote.long("subtotalItems"))}")
-            Text("Ongkir: ${rupiah(quote.long("deliveryFee"))}")
-            Text("Total: ${rupiah(quote.long("totalPayment"))}")
-            if (!quote.flag("canCheckout")) Text("Checkout belum tersedia: ${quote.text("validationCode")}", color = MaterialTheme.colorScheme.error)
-            PrimaryButton("Buat pesanan", { vm.checkout(done) }, quote.flag("canCheckout"))
-        } } }
+        s.quote?.let { quote -> item { CheckoutSummary(quote, s.busy) { vm.checkout(done) } } }
+    }
+}
+
+@Composable internal fun CheckoutSummary(quote: JsonObject, busy: Boolean, confirm: () -> Unit) {
+    var agreed by rememberSaveable(quote.toString()) { mutableStateOf(false) }
+    Panel("Ringkasan pembayaran") {
+        quote.list("items").forEach { item ->
+            Text("${item.text("name")} · ${item.text("quantityKg")} kg · ${rupiah(item.long("pricePerKg"))}/kg")
+            Text("Subtotal produk: ${rupiah(item.long("itemSubtotal"))}")
+        }
+        Text("Produk: ${rupiah(quote.long("subtotalItems"))}")
+        Text("Ongkir: ${rupiah(quote.long("deliveryFee"))}")
+        Text("Total: ${rupiah(quote.long("totalPayment"))}")
+        Text("Limit transaksi: ${rupiah(quote.long("transactionLimitApplied"))}")
+        Text("Jadwal: ${quote.text("scheduledDate")} · ${quote.text("scheduledTimeSlot")} (${quote.text("timeZone")})")
+        Text(if (quote.text("fulfillmentMethod") == "delivery")
+            "Antar: ${quote.text("deliveryDistrict")} · ${quote.text("deliveryAddress")}" else "Ambil di: ${quote.text("pickupLocation")}")
+        if (!quote.flag("canCheckout")) Text("Checkout belum tersedia: ${quote.text("validationCode")}", color = MaterialTheme.colorScheme.error)
+        Row {
+            Checkbox(agreed, { agreed = it }, enabled = !busy && quote.flag("canCheckout"))
+            Text("Saya menyetujui produk, total pembayaran, dan jadwal di atas.")
+        }
+        PrimaryButton("Buat pesanan", confirm, !busy && agreed && quote.flag("canCheckout"))
     }
 }
