@@ -36,13 +36,15 @@ import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import id.panenku.app.R
+import id.panenku.app.ui.admin.AdminLoginScreen
+import id.panenku.app.ui.admin.AdminTheme
 import id.panenku.app.ui.theme.PanenkuColors
 import kotlin.math.max
 
 enum class OpeningRole(val apiValue: String, val title: String) {
     BUYER("pembeli", "Pembeli"), FARMER("petani", "Petani")
 }
-internal enum class OpeningPage { SPLASH, ROLE, LOGIN, REGISTER, VERIFICATION, WAITING }
+internal enum class OpeningPage { SPLASH, ROLE, LOGIN, REGISTER, VERIFICATION, WAITING, ADMIN_LOGIN }
 data class RegistrationInput(val role: OpeningRole, val name: String, val phone: String,
     val email: String, val password: String, val address: String, val storeName: String)
 internal val OpeningPaper = Color(0xFFFAFAFA)
@@ -57,7 +59,7 @@ data class FarmerOnboardingState(val draftReady: Boolean = false, val accountCre
 @Composable
 fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegister: (RegistrationInput) -> Unit,
     farmer: FarmerOnboardingState = FarmerOnboardingState(), onPrepareFarmer: (RegistrationInput) -> Unit = {},
-    onVerifyFarmer: (FarmerVerificationInput) -> Unit = {}, onVerificationExit: () -> Unit = {}) {
+    onVerifyFarmer: (FarmerVerificationInput) -> Unit = {}, onVerificationExit: () -> Unit = {}, onAdminLogin: (String, String) -> Unit = onLogin) {
     var pageName by rememberSaveable { mutableStateOf(OpeningPage.SPLASH.name) }
     var selectedName by rememberSaveable { mutableStateOf(OpeningRole.BUYER.name) }
     val page = OpeningPage.valueOf(pageName)
@@ -81,7 +83,8 @@ fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegis
         when (destination) {
             OpeningPage.SPLASH -> AnimatedOpeningSplash { pageName = OpeningPage.ROLE.name }
             OpeningPage.ROLE -> OpeningRoleScreen(selected, { selectedName = it.name },
-                { pageName = OpeningPage.REGISTER.name }, { pageName = OpeningPage.LOGIN.name }, { dispatcher?.onBackPressed() })
+                { pageName = OpeningPage.REGISTER.name }, { pageName = OpeningPage.LOGIN.name }, { dispatcher?.onBackPressed() }, {pageName = OpeningPage.ADMIN_LOGIN.name})
+            OpeningPage.ADMIN_LOGIN -> AdminTheme { AdminLoginScreen(busy, ::back, onAdminLogin) }
             OpeningPage.LOGIN -> OpeningLoginScreen(busy, onLogin, { pageName = OpeningPage.REGISTER.name }, ::back, selected)
             OpeningPage.REGISTER -> OpeningRegistrationScreen(selected, busy, { input ->
                 if (input.role == OpeningRole.FARMER) { onPrepareFarmer(input); pageName = OpeningPage.VERIFICATION.name }
@@ -192,7 +195,7 @@ fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegis
 }
 
 @Composable fun OpeningRoleScreen(selected: OpeningRole, onSelect: (OpeningRole) -> Unit,
-    onContinue: () -> Unit, onLogin: () -> Unit, onBack: () -> Unit) {
+    onContinue: () -> Unit, onLogin: () -> Unit, onBack: () -> Unit, onAdmin: () -> Unit = {}) {
     OpeningLayout {
         OpeningStep(1, onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -231,6 +234,7 @@ fun PanenkuOpeningFlow(busy: Boolean, onLogin: (String, String) -> Unit, onRegis
             Spacer(Modifier.height(20.dp))
         }
         OpeningFooter("Sudah memiliki akun?", "Masuk", onClick = onLogin)
+        TextButton(onClick = onAdmin, modifier = Modifier.fillMaxWidth()) { Text("Akses administrator", fontSize = 11.sp, color = PanenkuColors.Muted) }
         Spacer(Modifier.height(14.dp))
     }
 }

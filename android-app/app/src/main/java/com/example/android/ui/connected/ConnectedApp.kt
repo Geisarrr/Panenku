@@ -24,6 +24,8 @@ import id.panenku.app.R
 import id.panenku.app.data.remote.*
 import id.panenku.app.ui.components.*
 import id.panenku.app.ui.auth.PanenkuOpeningFlow
+import id.panenku.app.ui.connected.buyer.BuyerAppFlow
+import id.panenku.app.ui.admin.AdminAppFlow
 
 /** Live entry point. Uses the sliced design system, never Demo*Repository. */
 @Composable
@@ -32,9 +34,13 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
     if (state.user == null) {
         PanenkuOpeningFlow(state.busy, vm::login, vm::registerAccount,
             farmer = state.farmerOnboarding, onPrepareFarmer = vm::prepareFarmerAccount,
-            onVerifyFarmer = vm::submitFarmerRegistration, onVerificationExit = vm::finishFarmerVerification)
+            onVerifyFarmer = vm::submitFarmerRegistration, onVerificationExit = vm::finishFarmerVerification, onAdminLogin = vm::loginAdmin)
     } else if (state.user!!.role == "petani") {
         key(state.user!!.id) { FarmerConnectedApp(state, vm) }
+    } else if (state.user!!.role == "pembeli") {
+        BuyerAppFlow(state,vm,notificationsScreen={ back -> ConnectedNotifications(state,vm,back) },loadNotifications=vm::notifications)
+    } else if (state.user!!.role == "admin") {
+        key(state.user!!.id) { AdminAppFlow(state,vm) }
     } else key(state.user!!.id) {
         var screen by rememberSaveable { mutableStateOf(if (state.user!!.role == "admin") "admin" else "catalog") }
         var orderId by rememberSaveable { mutableStateOf("") }

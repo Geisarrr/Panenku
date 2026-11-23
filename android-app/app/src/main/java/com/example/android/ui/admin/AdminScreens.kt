@@ -1,136 +1,168 @@
 package id.panenku.app.ui.admin
 
-import id.panenku.app.ui.components.*
-
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.foundation.shape.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import id.panenku.app.data.*
-import id.panenku.app.ui.theme.PanenkuTheme
+import com.google.gson.JsonObject
+import id.panenku.app.R
+import id.panenku.app.data.remote.*
+import id.panenku.app.ui.connected.buyer.*
+import java.time.ZoneId
 
-
-@Composable
-fun AdminHomeScreen(onNavigate: (String) -> Unit, onLogout: () -> Unit) {
-    Page("Ringkasan admin", "Admin Maya · data contoh", admin = true) {
-        item { AdaptiveMetrics(listOf("Verifikasi petani" to "8", "Tiket eskalasi" to "3")) { onNavigate(if (it == 0) "admin-verification" else "admin-disputes") } }
-        item { Panel("Prioritas hari ini") {
-            StatusBadge("Perlu tindakan", Tone.WARNING)
-            MenuRow("Tinjau #VER-019", "Petani Contoh · Menunggu pemeriksaan", Icons.Outlined.VerifiedUser) { onNavigate("admin-verification") }
-            MenuRow("Dana refund belum diterima", "#TKT-026 · #RF-002 · Buka kronologi", Icons.Outlined.ReportProblem) { onNavigate("admin-disputes") }
-            MenuRow("2 produk dilaporkan", "Satu laporan kategori tidak sesuai", Icons.Outlined.Inventory2) { onNavigate("admin-moderation") }
-            MenuRow("1 akun perlu ditinjau", "Laporan transaksi berulang", Icons.Outlined.PeopleOutline) { onNavigate("admin-users") }
-        } }
-        item { Panel("Ruang administrasi") {
-            MenuRow("Pengguna & status akun", "Cari pengguna, suspensi / pulihkan", Icons.Outlined.PeopleOutline) { onNavigate("admin-users") }
-            MenuRow("Komoditas", "Kelola kategori aktif dan nonaktif", Icons.Outlined.Category) { onNavigate("admin-commodities") }
-            MenuRow("Moderasi produk", "Tinjau laporan dan alasan perbaikan", Icons.Outlined.Inventory2) { onNavigate("admin-moderation") }
-            MenuRow("Pantau seluruh pesanan", "Status, pembayaran, jadwal, dan aktor", Icons.AutoMirrored.Outlined.ReceiptLong) { onNavigate("admin-orders") }
-            MenuRow("Pengaturan admin", "Limit transaksi & kontak WhatsApp CS", Icons.Outlined.Settings) { onNavigate("admin-settings") }
-        } }
-        item { Panel("Keputusan terbaru · Audit contoh") {
-            Timeline(listOf("#VER-018 ditolak" to "22 Juni, 09.00 · Maya · Foto identitas terpotong", "#PRD-041 dinonaktifkan" to "21 Juni, 15.10 · Maya · Komoditas tidak sesuai"))
-            Text("Audit server, hak akses, dan waktu tindakan akan disediakan backend.", style = MaterialTheme.typography.bodySmall)
-        } }
-        item { SecondaryButton("Keluar dari akun admin", onLogout) }
-    }
-}
-
-@Composable
-fun AdminVerificationScreen(decisions: Map<String, String>, onBack: () -> Unit, onDecision: (String, String, String, Boolean) -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable { mutableStateOf("Menunggu") }
-    var selected by rememberSaveable { mutableStateOf("VER-019") }
-    val queue = listOf("VER-019" to "Kebun Contoh", "VER-020" to "Tani Demo")
-    val filtered = queue.filter { (id, name) -> ("$id $name").contains(query, true) && when (filter) {
-        "Disetujui" -> decisions[id]?.startsWith("Disetujui") == true
-        "Ditolak" -> decisions[id]?.startsWith("Ditolak") == true
-        else -> decisions[id] == null
-    } }
-    val review = filtered.find { it.first == selected } ?: filtered.firstOrNull()
-    var reason by rememberSaveable(review?.first) { mutableStateOf("") }
-    var checks by rememberSaveable(review?.first) { mutableStateOf(false) }
-    Page("Verifikasi petani", "Pengajuan menunggu pemeriksaan · demo", onBack, true) {
-        item { SearchField(query, { query = it }, "Cari nama toko / ID pengajuan") }
-        item { FilterChips(listOf("Menunggu", "Disetujui", "Ditolak"), filter, { filter = it }) }
-        if (filtered.isEmpty()) item { EmptyState("Tidak ada pengajuan pada filter ini") }
-        items(filtered, key = { it.first }) { (id, name) -> Panel { MenuRow("#$id · $name", if (review?.first == id) "Dipilih untuk ditinjau" else "Ketuk untuk meninjau", Icons.Outlined.Description) { selected = id } } }
-        if (review != null) {
-            val id = review.first
-            item { Panel("Tinjau #$id") {
-                StatusBadge(decisions[id] ?: "Menunggu keputusan admin", Tone.WARNING)
-                KeyValue("Pemohon contoh", "Petani Contoh"); KeyValue("Nama toko", review.second); KeyValue("Lokasi", "Lowokwaru, Malang"); KeyValue("Email contoh", "petani@example.com")
-                Notice("KTP DUMMY · CONTOH", "Nama: Petani Contoh · NIK: DUMMY-0000. Bukan dokumen identitas asli.", Tone.INFO)
-                EvidenceCard("Dokumen ktp-dummy-${id.takeLast(3)}.jpg")
-            } }
-            item { Panel("Pemeriksaan & keputusan") {
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checks, { checks = it }); Text("Data toko, lokasi, dan keterbacaan dokumen sudah diperiksa.", style = MaterialTheme.typography.bodyMedium) }
-                PrimaryButton("Setujui verifikasi petani", { onDecision(id, "Disetujui", "Pemeriksaan demo lengkap", false) }, checks && decisions[id] == null)
-                Field("Alasan penolakan (wajib)", reason, { reason = it }, "Jelaskan bagian data yang harus diperbaiki", multiline = true)
-                SecondaryButton("Tolak dengan alasan", { onDecision(id, "Ditolak", reason, true) }, enabled = decisions[id] == null)
-            } }
-            item { Notice("Keputusan dapat ditelusuri", "Persetujuan membuka syarat verifikasi untuk penerbitan produk. Penolakan memerlukan alasan perbaikan.") }
+/** Callback signatures of the older navigation graph remain compatible; live entry supplies server snapshots. */
+@Composable fun AdminHomeScreen(onNavigate:(String)->Unit,onLogout:()->Unit,state:AdminUiState=AdminUiState(),actor:String="") {
+    val date=LocalBuyerClock.current().atZone(ZoneId.of("Asia/Jakarta")).toLocalDate().toString()
+    APage("Ringkasan admin","${dateLabel(date)}${if(actor.isNotBlank())" · $actor" else ""}",onLogout,brand=false){
+        Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){
+            listOf(Triple(state.verificationCount,"Verifikasi petani","admin-verification"),Triple(state.disputeCount,"Tiket eskalasi","admin-disputes")).forEach{(count,label,route)->
+                Column(Modifier.weight(1f).background(BPaper,RoundedCornerShape(14.dp)).clickable(role=Role.Button){onNavigate(route)}.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){FText(count?.toString() ?: "—",22f,700,FForest);FText(label,12f,color=FMuted)}
+            }
+        }
+        FCard("Prioritas hari ini"){
+            FBadge("Perlu tindakan","orange")
+            state.priorities.firstOrNull()?.let{q->AMenu(R.drawable.admin_seal,"Tinjau #${shortId(q.text("applicationId").ifBlank{q.text("farmerId")})}","${q.text("storeName")} · Menunggu sejak ${dateTimeLabel(q.text("submittedAt"))}"){onNavigate("admin-verification")};FRule()}
+            if((state.disputeCount ?: 0)>0){AMenu(R.drawable.admin_help,"Sengketa refund menunggu","${state.disputeCount} tiket · Buka kronologi"){onNavigate("admin-disputes")};FRule()}
+            AMenu(R.drawable.admin_box,"Moderasi produk","Layanan laporan produk belum tersedia"){onNavigate("admin-moderation")};FRule()
+            AMenu(R.drawable.admin_user,"Pengguna & status akun",state.suspendedCount?.let{"$it akun disuspensi · Tinjau status"} ?: "Periksa akses pengguna"){onNavigate("admin-users")}
+            if(state.loaded && state.priorities.isEmpty() && state.disputeCount==0L)FText("Tidak ada pengajuan atau sengketa terbuka saat dimuat.",11f,color=FMuted)
+        }
+        FCard("Ruang administrasi"){
+            AMenu(R.drawable.admin_user,"Pengguna & status akun","Cari pengguna, suspensi / pulihkan"){onNavigate("admin-users")};FRule()
+            AMenu(R.drawable.admin_box,"Komoditas & moderasi","Kelola kategori aktif dan produk dilaporkan"){onNavigate("admin-commodities")};FRule()
+            AMenu(R.drawable.admin_file,"Pantau seluruh pesanan","Status, pembayaran, jadwal, dan aktor"){onNavigate("admin-orders")};FRule()
+            AMenu(R.drawable.admin_gear,"Pengaturan admin","Limit transaksi & kontak WhatsApp CS"){onNavigate("admin-settings")}
+        }
+        FCard("Keputusan terbaru · Audit"){
+            AHistory(state.recentAudit)
+            FText("Setiap keputusan menyimpan waktu, admin, dan alasan. Ringkasan ini tidak menunjukkan saldo titipan atau escrow.",10f,color=FMuted)
+            FText("Lihat seluruh audit",12f,600,FGreen,Modifier.clickable(role=Role.Button){onNavigate("admin-audit")})
+            Row(horizontalArrangement=Arrangement.spacedBy(16.dp)){
+                FText("Notifikasi",11f,600,FGreen,Modifier.clickable(role=Role.Button){onNavigate("admin-notifications")})
+                FText("Pembayaran terlambat",11f,600,FGreen,Modifier.clickable(role=Role.Button){onNavigate("admin-late-payments")})
+            }
         }
     }
 }
-
-@Composable
-fun AdminUsersScreen(decisions: Map<String, String>, onBack: () -> Unit, onDecision: (String, String, String, Boolean) -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable { mutableStateOf("Semua") }
-    var selected by rememberSaveable { mutableStateOf("USR-012") }
-    val users = listOf(Triple("USR-012", "Darto Sobianto", "Petani"), Triple("USR-021", "Rina Catering", "Pembeli"), Triple("USR-034", "Tani Contoh", "Petani"))
-    fun status(id: String) = decisions[id] ?: if (id == "USR-034") "Disuspensi · 21 Juni, 10.00" else "Aktif"
-    val filtered = users.filter { (id, name, role) -> "$id $name".contains(query, true) && (filter == "Semua" || role == filter || (filter == "Disuspensi" && status(id).startsWith("Disuspensi"))) }
-    val user = filtered.find { it.first == selected } ?: filtered.firstOrNull()
-    var reason by rememberSaveable(user?.first) { mutableStateOf("") }
-    Page("Pengguna & status akun", "Kelola akses tanpa menghapus riwayat transaksi", onBack, true) {
-        item { SearchField(query, { query = it }, "Cari nama / email / ID pengguna") }
-        item { FilterChips(listOf("Semua", "Petani", "Pembeli", "Disuspensi"), filter, { filter = it }) }
-        items(filtered, key = { it.first }) { (id, name, role) -> Panel { MenuRow("$name · #$id", "$role · ${status(id)}", Icons.Outlined.PersonOutline) { selected = id } } }
-        if (filtered.isEmpty()) item { EmptyState() }
-        if (user != null) item { Panel("Detail #${user.first}") {
-            StatusBadge(status(user.first), if (status(user.first).startsWith("Disuspensi")) Tone.WARNING else Tone.SUCCESS)
-            KeyValue("Nama pengguna", user.second); KeyValue("Tipe", user.third); KeyValue("Lokasi", "Lowokwaru, Malang")
-            Field("Alasan tindakan (wajib)", reason, { reason = it }, "Tulis pelanggaran atau hasil pemeriksaan pemulihan", multiline = true)
-            if (status(user.first).startsWith("Disuspensi")) PrimaryButton("Tinjau & pulihkan ${user.first}", { onDecision(user.first, "Aktif · Dipulihkan", reason, true) })
-            else PrimaryButton("Suspensi akun dengan alasan", { onDecision(user.first, "Disuspensi", reason, true) })
-            Text("Suspensi membatasi produk dan transaksi baru. Pesanan serta refund lama tetap bisa ditangani.", style = MaterialTheme.typography.bodySmall)
-        } }
-        item { Notice("Semua perubahan masuk log", "Demo mencatat keputusan di memori. Pencatatan audit permanen memerlukan backend.") }
+@Composable fun AdminVerificationScreen(decisions:Map<String,String>,onBack:()->Unit,onDecision:(String,String,String,Boolean)->Unit,state:AdminUiState=AdminUiState(),onFilter:(String,String)->Unit={_,_->},onSelect:(String)->Unit={},onDocument:()->Unit={},onMore:()->Unit={}) {
+    var query by rememberSaveable{mutableStateOf(state.queueQuery)}
+    val row=state.verification
+    var nameCheck by rememberSaveable(state.verificationUser,row?.text("applicationId"),row?.text("submittedAt")){mutableStateOf(false)};var locationCheck by rememberSaveable(state.verificationUser,row?.text("applicationId"),row?.text("submittedAt")){mutableStateOf(false)};var documentCheck by rememberSaveable(state.verificationUser,row?.text("applicationId"),row?.text("submittedAt")){mutableStateOf(false)}
+    var reason by rememberSaveable(state.verificationUser,row?.text("applicationId"),row?.text("submittedAt")){mutableStateOf("")};var confirm by remember{mutableStateOf<Boolean?>(null)}
+    val checked=nameCheck && locationCheck && documentCheck
+    APage("Verifikasi petani","${state.queueTotal} pengajuan pada filter ini",onBack){
+        ASearch(query,{query=it.take(100)},"Cari nama toko / ID pengajuan"){onFilter(state.queueStatus,query)}
+        AChips(listOf("menunggu" to "Menunggu${state.verificationCount?.let{" ($it)"}.orEmpty()}","disetujui" to "Disetujui","ditolak" to "Ditolak"),state.queueStatus){onFilter(it,query)}
+        FCard("Antrean pengajuan"){
+            if(state.queue.isEmpty())FText("Tidak ada pengajuan pada filter ini.",12f,color=FMuted)
+            state.queue.forEachIndexed{i,q->AMenu(R.drawable.admin_file,"#${shortId(q.text("applicationId").ifBlank{q.text("farmerId")})} · ${q.text("storeName")}","${dateTimeLabel(q.text("submittedAt"))} · ${if(q.text("farmerId")==state.verificationUser)"Dipilih untuk ditinjau" else "Buka pengajuan"}"){onSelect(q.text("farmerId"))};if(i<state.queue.lastIndex)FRule()}
+            if(state.queueMore)FButton("Muat pengajuan lainnya",onMore,primary=false,enabled=!state.busy)
+        }
+        if(row!=null){
+            FCard("Tinjau #${shortId(row.text("applicationId").ifBlank{state.verificationUser})}"){
+                FBadge(when(row.text("status")){"menunggu"->"Menunggu keputusan admin";"disetujui"->"Disetujui";else->"Ditolak"},if(row.text("status")=="menunggu")"orange" else "green")
+                FKeyValue("Pemohon",row.text("dummyName").ifBlank{"Belum tersedia"});FKeyValue("Nama toko",row.text("storeName"));FKeyValue("Lokasi",row.text("pickupLocation").ifBlank{"Belum tersedia"});FKeyValue("Email",row.text("email"))
+                FText("Dokumen pengembangan hanya untuk pemeriksaan data ilustratif, bukan pemeriksaan identitas nyata.",10f,color=FMuted)
+                Column(Modifier.fillMaxWidth().background(Color(0xFFEDF5FF),RoundedCornerShape(12.dp)).padding(14.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+                    FText("KTP DUMMY · CONTOH",16f,700,Color(0xFF1766A2))
+                    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                        Box(Modifier.size(58.dp,66.dp).background(Color.White,RoundedCornerShape(10.dp)),contentAlignment=Alignment.Center){FIcon(R.drawable.admin_user,22.dp)}
+                        Column(verticalArrangement=Arrangement.spacedBy(6.dp)){FText("Nama: ${row.text("dummyName")}",12f);FText("NIK: ${row.text("dummyNik")}",12f);FText("Bukan dokumen identitas asli",10f,color=FMuted)}
+                    }
+                }
+                FKeyValue("Berkas",row.text("fileName").ifBlank{"Belum ada berkas"});FKeyValue("Ukuran / dikirim","${shortFileSize(row.long("fileSizeBytes"))} · ${dateTimeLabel(row.text("submittedAt"))}")
+                FButton("Perbesar dokumen dummy",onDocument,primary=false,enabled=row.flag("hasDocument") && !state.busy)
+                if(row.text("rejectionReason").isNotBlank())BNotice("Alasan penolakan",row.text("rejectionReason"),"orange")
+            }
+            FCard("Pemeriksaan & keputusan"){
+                listOf(Triple("Data toko lengkap",nameCheck,{v:Boolean->nameCheck=v}),Triple("Lokasi dan layanan tercantum",locationCheck,{v:Boolean->locationCheck=v}),Triple("Cocokkan keterbacaan identitas dan pemilik",documentCheck,{v:Boolean->documentCheck=v})).forEach{(label,value,change)->Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){Checkbox(value,change,Modifier.size(18.dp),enabled=!state.busy && row.text("status")=="menunggu",colors=CheckboxDefaults.colors(checkedColor=FGreen));FText(label,12f)}}
+                FButton("Setujui verifikasi petani",{confirm=true},enabled=!state.busy && checked && row.flag("hasDocument") && row.text("status")=="menunggu")
+                FRule();FField("Alasan penolakan (wajib)",reason,{reason=it.take(1000)},"Jelaskan bagian data yang harus diperbaiki",multiline=true,enabled=row.text("status")=="menunggu")
+                FButton("Tolak dengan alasan",{confirm=false},primary=false,enabled=!state.busy && reason.isNotBlank() && row.text("status")=="menunggu")
+            }
+        }
+        BNotice("Keputusan dapat ditelusuri","Persetujuan membuka syarat verifikasi untuk penerbitan produk. Penolakan memerlukan alasan; akun yang disuspensi tetap dibatasi.")
     }
+    confirm?.let{approved->AConfirm(if(approved)"Setujui verifikasi petani?" else "Tolak pengajuan?","Keputusan untuk ${row?.text("storeName").orEmpty()} akan disimpan di server.",cancel={confirm=null}){confirm=null;onDecision(state.verificationUser,if(approved)"Disetujui" else "Ditolak",reason,!approved)}}
 }
-
-@Composable
-fun AdminSettingsScreen(values: Map<String, String>, onBack: () -> Unit, onSave: (Map<String, String>) -> Unit) {
-    var limit by rememberSaveable { mutableStateOf(values["Limit"] ?: "10000000") }
-    var phone by rememberSaveable { mutableStateOf(values["WhatsApp"] ?: "+6280000000000") }
-    Page("Pengaturan admin", "Aturan transaksi & kanal dukungan", onBack, true) {
-        item { Panel("Batas awal transaksi") {
-            StatusBadge("Berlaku untuk checkout baru")
-            Field("Batas total per pesanan (Rp)", limit, { limit = it.filter(Char::isDigit).take(12) }, keyboard = KeyboardType.Number)
-            KeyValue("Yang dihitung", "Σ kg × Rp/kg + ongkir")
-            Notice("Validasi saat disimpan", "Ambil seluruh ongkir dan nilai produk dalam total. Pesanan lama memakai batas saat transaksi dibuat.")
-        } }
-        item { Panel("WhatsApp customer service") {
-            Field("Nomor WhatsApp CS", phone, { phone = it }, keyboard = KeyboardType.Phone)
-            Text("Contoh nomor tersamarkan. Ganti dengan nomor CS resmi sebelum integrasi layanan.", style = MaterialTheme.typography.bodySmall)
-            Text("Pesan aman untuk CS", style = MaterialTheme.typography.labelLarge)
-            Text("ID tiket, ID pesanan/refund, dan ringkasan masalah. Jangan menyertakan rekening, KTP, atau alamat pribadi.", style = MaterialTheme.typography.bodySmall)
-        } }
-        item { PrimaryButton("Simpan pengaturan admin", { onSave(mapOf("Limit" to limit, "WhatsApp" to phone)) }, (limit.toLongOrNull() ?: 0) > 0 && phone.startsWith("+") && phone.drop(1).all(Char::isDigit) && phone.length >= 10) }
-        item { Panel("Konteks audit") { KeyValue("Versi pengaturan", "Konfigurasi awal · V2"); KeyValue("Aktor perubahan", "Admin Maya"); Text("Penyimpanan saat ini hanya di memori demo.", style = MaterialTheme.typography.bodySmall) } }
+@Composable fun AdminUsersScreen(decisions:Map<String,String>,onBack:()->Unit,onDecision:(String,String,String,Boolean)->Unit,state:AdminUiState=AdminUiState(),onFilter:(String,String,String)->Unit={_,_,_->},onSelect:(String)->Unit={},onMore:()->Unit={}) {
+    var query by rememberSaveable{mutableStateOf(state.usersQuery)};val u=state.user
+    var reason by rememberSaveable(u?.text("id"),u?.text("status")){mutableStateOf("")};var confirm by remember{mutableStateOf(false)}
+    val filter=if(state.usersStatus=="suspended")"suspended" else state.usersRole
+    APage("Pengguna & status akun","Kelola akses tanpa menghambat refund lama",onBack){
+        ASearch(query,{query=it.take(100)},"Cari nama / email pengguna"){onFilter(state.usersRole,state.usersStatus,query)}
+        AChips(listOf("" to "Semua","petani" to "Petani","pembeli" to "Pembeli","suspended" to "Disuspensi"),filter){onFilter(if(it=="suspended")"" else it,if(it=="suspended")"suspended" else "",query)}
+        FCard("Hasil pengguna"){
+            if(state.users.isEmpty())FText("Tidak ada pengguna pada filter ini.",12f,color=FMuted)
+            state.users.forEachIndexed{i,row->AMenu(R.drawable.admin_user,"${row.text("displayName").ifBlank{row.text("email")}} · #${shortId(row.text("id"))}","${row.text("role")} · ${if(row.text("status")=="active")"Aktif" else "Disuspensi"}${if(u?.text("id")==row.text("id"))" · Dipilih" else ""}"){onSelect(row.text("id"))};if(i<state.users.lastIndex)FRule()}
+            if(state.usersMore)FButton("Muat pengguna lainnya",onMore,primary=false,enabled=!state.busy)
+        }
+        if(u!=null){
+            FCard("Detail #${shortId(u.text("id"))}"){
+                FBadge("${u.text("ktpStatus").takeIf{it.isNotBlank()}?.let{"KTP $it · "}.orEmpty()}${if(u.text("status")=="active")"Akun aktif" else "Disuspensi"}",if(u.text("status")=="active")"green" else "red")
+                FKeyValue("Nama pengguna",u.text("ownerName").ifBlank{u.text("displayName")});FKeyValue("Email",u.text("email"));if(u.text("storeName").isNotBlank())FKeyValue("Toko",u.text("storeName"));if(u.text("pickupLocation").isNotBlank())FKeyValue("Lokasi",u.text("pickupLocation"))
+                FKeyValue("Refund berjalan",u.long("activeRefundCount").toString());FText("Rekening dan dokumen pribadi tidak ditampilkan pada daftar pengguna.",11f,color=FMuted)
+            }
+            if(u.text("role")!="admin")FCard(if(u.text("status")=="active")"Tindakan pada akun aktif" else "Pemulihan akun disuspensi"){
+                if(u.text("suspensionReason").isNotBlank())FText("Alasan: ${u.text("suspensionReason")}",12f,color=FMuted)
+                FField(if(u.text("status")=="active")"Alasan suspensi (wajib)" else "Catatan pemulihan",reason,{reason=it.take(1000)},"Tulis hasil pemeriksaan dan referensi laporan",multiline=true,enabled=!state.busy)
+                FButton(if(u.text("status")=="active")"Suspensi akun dengan alasan" else "Tinjau & pulihkan #${shortId(u.text("id"))}",{confirm=true},primary=false,enabled=reason.isNotBlank() && !state.busy)
+                FText("Suspensi memblokir produk aktif dan transaksi baru. Pesanan lama serta refund yang belum tuntas tetap dapat ditangani.",11f,color=FMuted)
+            }
+        }
+        state.users.firstOrNull{it.text("status")=="suspended" && it.text("id")!=u?.text("id")}?.let{suspended->FCard("Pemulihan akun disuspensi"){
+            FText("#${shortId(suspended.text("id"))} · ${suspended.text("displayName").ifBlank{suspended.text("email")}}",12f)
+            FBadge("Disuspensi","red")
+            FText("Periksa detail dan hasil peninjauan akun ini sebelum memulihkan aksesnya.",12f,color=FMuted)
+            FButton("Tinjau akun #${shortId(suspended.text("id"))}",{onSelect(suspended.text("id"))},primary=false,enabled=!state.busy)
+        }}
+        BNotice("Semua perubahan masuk log audit","Admin, waktu, status sebelumnya, status baru, dan alasan disimpan. Suspensi bukan keputusan bahwa dana refund telah diterima.")
     }
+    if(confirm && u!=null)AConfirm(if(u.text("status")=="active")"Suspensi akun ini?" else "Pulihkan akun ini?","${u.text("displayName").ifBlank{u.text("email")}} · $reason",cancel={confirm=false}){confirm=false;onDecision(u.text("id"),if(u.text("status")=="active")"Disuspensi" else "Aktif",reason,true)}
 }
-
-
-@Preview(showBackground = true, widthDp = 375, heightDp = 1100)
-@Composable private fun AdminPreview() { PanenkuTheme { AdminHomeScreen({}, {}) } }
+/** Legacy graph adapter; no fabricated defaults or in-memory success state. */
+@Composable fun AdminSettingsScreen(values:Map<String,String>,onBack:()->Unit,onSave:(Map<String,String>)->Unit) {
+    AdminSettingsLiveScreen(values,onBack,onSave)
+}
+@Composable internal fun AdminSettingsLiveScreen(values:Map<String,String>,onBack:()->Unit,onSave:(Map<String,String>)->Unit,settings:JsonObject?=null,busy:Boolean=false,onAudit:()->Unit={},onRefresh:()->Unit={}) {
+    val snapshot=settings?.toString().orEmpty()
+    var limit by rememberSaveable(snapshot){mutableStateOf(settings?.long("transactionLimit")?.toString().orEmpty())}
+    var phone by rememberSaveable(snapshot){mutableStateOf(settings?.text("csWhatsapp").orEmpty())}
+    var reason by rememberSaveable(snapshot){mutableStateOf("")}
+    val old=settings?.long("transactionLimit");val parsed=limit.toLongOrNull();var confirm by remember{mutableStateOf(false)}
+    val valid=settings!=null && parsed!=null && parsed>0 && adminPhoneValid(phone) && (parsed==old || reason.isNotBlank())
+    APage("Pengaturan admin","Aturan transaksi & kanal dukungan",onBack){
+        if(settings==null)AEmpty("Pengaturan belum dimuat dari server.")
+        FCard("Batas awal transaksi"){
+            FBadge("Berlaku untuk checkout baru")
+            AdminCurrencyField(limit,{limit=it.take(19)},enabled=!busy && settings!=null)
+            parsed?.takeIf{it>0}?.let{FText("Nilai saat ini: ${money(it)}, termasuk ongkos kirim.",11f,color=FMuted)}
+            FKeyValue("Yang dihitung","Σ kg × Rp/kg + ongkir",size=12f)
+            FText("Ambil sendiri: ongkir Rp0. Pesanan dengan total melebihi batas tidak dapat dibuat. Perubahan tidak mengubah total pesanan lama.",12f,color=FMuted)
+            BNotice("Validasi saat disimpan","Harus berupa nominal rupiah bulat, lebih dari Rp0. Sistem menolak nilai kosong atau bukan angka.")
+            if(parsed!=old)FField("Alasan perubahan limit (wajib)",reason,{reason=it.take(1000)},"Jelaskan alasan perubahan",multiline=true,enabled=!busy)
+        }
+        FCard("WhatsApp customer service"){
+            FField("Nomor WhatsApp CS",phone,{phone=it.take(50)},"+62 ...",keyboard=KeyboardType.Phone,enabled=!busy && settings!=null)
+            FText("Gunakan kode negara dan angka yang valid. Kontak dibuka setelah tiket eskalasi dicatat di Panenku.",12f,color=FMuted)
+            FRule();FText("Pesan aman untuk CS",14f,600)
+            FText("ID tiket, ID pesanan/refund, dan ringkasan masalah saja. Jangan menyertakan rekening, KTP, atau alamat pribadi.",12f)
+        }
+        FButton("Simpan pengaturan admin",{confirm=true},enabled=valid && !busy)
+        FCard("Konteks audit"){
+            FKeyValue("Versi pengaturan",settings?.long("settingsVersion")?.let{"Versi $it"} ?: "Belum tersedia")
+            FKeyValue("Aktor perubahan",settings?.text("lastChangedByName").orEmpty().ifBlank{settings?.text("lastChangedByEmail").orEmpty().ifBlank{"Belum tersedia"}})
+            FText("${settings?.text("lastChangedAt").orEmpty().takeIf{it.isNotBlank()}?.let{dateTimeLabel(it)+" · "}.orEmpty()}Setiap penyimpanan mencatat nilai lama, nilai baru, waktu, dan admin yang mengubahnya. Data pribadi tidak ditampilkan di ringkasan.",11f,color=FMuted)
+            AMenu(R.drawable.admin_file,"Riwayat perubahan","Lihat aturan dan kontak sebelumnya",onAudit)
+        }
+        FButton("Muat ulang pengaturan",onRefresh,primary=false,enabled=!busy)
+    }
+    if(confirm)AConfirm("Simpan pengaturan admin?","Limit ${parsed?.let{money(it)}} dan nomor CS akan disimpan di server. Perubahan limit berlaku untuk checkout baru.",confirm="Simpan",cancel={confirm=false}){confirm=false;onSave(mapOf("Limit" to limit,"WhatsApp" to phone,"Reason" to reason))}
+}

@@ -110,17 +110,17 @@ internal val BuyerFont = FontFamily(*listOf(400, 500, 600, 700).map {
     }
 }
 @Composable internal fun FField(label: String, value: String, onChange: (String) -> Unit,
-    placeholder: String = "", multiline: Boolean = false, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true) {
+    placeholder: String = "", multiline: Boolean = false, keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true, showLabel: Boolean = true, round: Dp = 12.dp) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FText(label, 12f, color = Color(0xFF3F3F46), line = 16f)
+        if(showLabel) FText(label, 12f, color = Color(0xFF3F3F46), line = 16f)
         BasicTextField(value, onChange, Modifier.fillMaxWidth().testTag("buyer-input-$label"), enabled = enabled,
             singleLine = !multiline, minLines = if (multiline) 2 else 1,
             textStyle = TextStyle(fontFamily = BuyerFont, fontSize = 13.sp, lineHeight = 20.sp,
                 color = Color(0xFF18181B), platformStyle = PlatformTextStyle(includeFontPadding = false)),
             keyboardOptions = KeyboardOptions(keyboardType = keyboard), cursorBrush = SolidColor(FGreen),
             decorationBox = { inner ->
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White)
-                    .border(1.dp, Color(0xFFE4E4E7), RoundedCornerShape(12.dp)).heightIn(min = if (multiline) 60.dp else 40.dp)
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(round)).background(Color.White)
+                    .border(1.dp, Color(0xFFE4E4E7), RoundedCornerShape(round)).heightIn(min = if (multiline) 60.dp else 40.dp)
                     .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
                     if (value.isBlank()) FText(placeholder, 13f, color = Color(0xFF9A9A9A), line = 20f)
                     inner()

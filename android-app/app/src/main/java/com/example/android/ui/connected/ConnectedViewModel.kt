@@ -14,12 +14,14 @@ import id.panenku.app.data.remote.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import id.panenku.app.ui.connected.buyer.*
+import id.panenku.app.ui.admin.AdminUiState
 import java.security.MessageDigest
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 /** All active screens use this state; legacy SampleData is never copied into it. */
 data class ConnectedState(
+    val adminUi: AdminUiState = AdminUiState(),
     val user: ApiUser? = null, val busy: Boolean = false, val error: String? = null, val message: String? = null,
     val products: List<JsonObject> = emptyList(), val cart: JsonObject = JsonObject(),
     val orders: List<JsonObject> = emptyList(), val refunds: List<JsonObject> = emptyList(),
@@ -36,15 +38,22 @@ data class ConnectedState(
     val review: JsonObject? = null, val reviewLoaded: Boolean = false,
     val image: ByteArray? = null, val profile: JsonObject? = null,
     val page: Int = 0, val more: Boolean = false,
-<<<<<<< HEAD
-    val deliveryAreas: List<String> = emptyList(), val shippingEnabled: Boolean = false,
+    val buyerReview: JsonObject? = null, val buyerReviewLoaded: Boolean = false, val buyerReviewAvailable: Boolean = true,
+    val buyerRefund: JsonObject? = null, val buyerTicket: JsonObject? = null, val buyerTicketId: String? = null,
+    val buyerTicketDraft: JsonObject = JsonObject(), val buyerTicketPendingReason: String? = null,
+    val buyerStore: JsonObject? = null, val buyerStoreProducts: List<JsonObject> = emptyList(),
+    val buyerStoreReviews: List<JsonObject> = emptyList(),
+
+    val buyerHome: List<JsonObject> = emptyList(), val buyerResults: List<JsonObject> = emptyList(),
+    val buyerSearch: BuyerSearch = BuyerSearch(), val buyerSearchLoaded: Boolean = false,
+    val buyerSearchPage: Int = 0, val buyerSearchTotal: Long = 0, val buyerSearchMore: Boolean = false,
+    val buyerProduct: JsonObject? = null, val buyerRecent: List<JsonObject> = emptyList(),
+    val buyerSelected: Set<String> = emptySet(), val buyerKnownCart: Set<String> = emptySet(),
+    val buyerSelectionInitialized: Boolean = false, val buyerFulfillment: String = "pickup",
+    val buyerNotificationPage: Int = 0, val buyerNotificationMore: Boolean = false,
+    val buyerCheckoutWarning: String? = null,
     val buyerAddresses: List<SavedBuyerAddress> = emptyList(), val buyerAddressId: String? = null,
-    val buyerTransactionLoaded: Boolean = false, val buyerQris: ByteArray? = null, val buyerQrisId: String? = null
-)
-class ConnectedViewModel @JvmOverloads constructor(app: Application,
-    private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
-    private val buyerAddressStore = BuyerAddressStore(app)
-=======
+    val buyerTransactionLoaded: Boolean = false, val buyerQris: ByteArray? = null, val buyerQrisId: String? = null,
     val farmerOrderProofs: Map<String, List<JsonObject>> = emptyMap(),
     val farmerVerification: JsonObject? = null,
     val farmerRefund: JsonObject? = null, val farmerRefundOrder: JsonObject? = null,
@@ -53,11 +62,12 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
 )
 class ConnectedViewModel @JvmOverloads constructor(app: Application,
     private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
+    private val buyerAddressStore = BuyerAddressStore(app)
+    private val buyerHelpStore = BuyerHelpStore(app)
     private val enrollment = FarmerEnrollment(api)
     private var farmerDraft: RegistrationInput? = null
     private var farmerDummyId = newDummyId()
     private fun newDummyId() = "DUMMY-" + java.util.UUID.randomUUID().toString().replace("-", "").take(12).uppercase()
->>>>>>> 6e40a1e952f647007ba3c22c1e6b422e7b483f11
     private val prefs = app.getSharedPreferences("request_keys", 0)
     private val keys = RequestKeys({ prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).commit(); Unit }, { prefs.edit().remove(it).commit(); Unit })
     private val mutable = MutableStateFlow(ConnectedState())
@@ -77,6 +87,248 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
             finally { set { it.copy(busy = false) } }
         }
     }
+
+    /** Buyer catalog uses live products and the existing profile/notification/cart contracts. */
+    fun buyerHome() = run {
+        require(role=="buyer")
+        val result=api.get(BuyerSearch().path()).asJsonObject
+        val products=result.list("items")
+        set { it.copy(buyerHome=products,products=(it.products+products).distinctBy { p->p.text("id") }) }
+        val categories=api.get("buyer/commodities").rows()
+        val profile=api.get("auth/profile").asJsonObject
+        val notices=api.get("notifications?page=0&size=1").asJsonObject
+        val cart=api.get("buyer/cart").asJsonObject
+        set { it.copy(commodities=categories,profile=profile,unreadNotificationCount=notices.long("unreadCount"),cart=cart) }
+    }
+    fun buyerCategories() = run {
+        val rows=api.get("buyer/commodities").rows();set { it.copy(commodities=rows) }
+    }
+    fun buyerSearch(criteria:BuyerSearch,page:Int=0) = run {
+        require(role=="buyer")
+        criteria.path(page) // validate even when searching stores locally
+        if(page==0)set { it.copy(buyerSearch=criteria,buyerSearchLoaded=false,buyerResults=emptyList(),buyerSearchMore=false) }
+        else require(state.value.buyerSearch==criteria) { "Pencarian berubah. Muat ulang hasil." }
+        val products:List<JsonObject>;val total:Long;val more:Boolean
+        if(criteria.stores) {
+            val all=mutableListOf<JsonObject>();var n=0
+            do {val r=api.get("buyer/products?sort=${criteria.sort}&page=$n&size=100"+(if(criteria.commodity.isBlank()) "" else "&commodityId=${criteria.commodity}")).asJsonObject
+                all+=r.list("items");n++
+                val remaining=n*100L<r.long("totalElements")
+            } while(remaining)
+            products=all.filter { it.text("storeName").contains(criteria.query.trim(),true) }.distinctBy { it.text("farmerId") }
+            total=products.size.toLong();more=false
+        } else {
+            val r=api.get(criteria.path(page)).asJsonObject;products=r.list("items");total=r.long("totalElements");more=(page+1)*20L<total
+        }
+        set { it.copy(buyerSearch=criteria,buyerSearchLoaded=true,buyerSearchPage=page,buyerSearchTotal=total,buyerSearchMore=more,
+            buyerResults=if(page==0)products else (it.buyerResults+products).distinctBy { p->p.text("id") },products=(it.products+products).distinctBy { p->p.text("id") }) }
+        if(state.value.commodities.isEmpty()) {val c=api.get("buyer/commodities").rows();set { it.copy(commodities=c) }}
+    }
+    fun buyerProduct(id:String) = run {
+        set { it.copy(buyerProduct=null) }
+        val result=api.get("buyer/products/$id").asJsonObject
+        val product=result.getAsJsonObject("product") ?: error("Produk belum tersedia.")
+        set { it.copy(buyerProduct=result,buyerRecent=(listOf(product)+it.buyerRecent).distinctBy { p->p.text("id") }.take(12),products=(listOf(product)+it.products).distinctBy { p->p.text("id") }) }
+    }
+    private suspend fun loadBuyerCart() {
+        val cart=api.get("buyer/cart").asJsonObject
+        val rows=cart.list("items");val ids=rows.map { it.text("id") }.toSet()
+        val available=rows.filter { it.flag("available") }.map { it.text("id") }.toSet()
+        set { it.copy(cart=cart,buyerSelected=if(!it.buyerSelectionInitialized)available else (it.buyerSelected.intersect(ids)+(available-it.buyerKnownCart)),
+            buyerKnownCart=ids,buyerSelectionInitialized=true,quote=null,checkoutBody=null,fulfillment=null,deliveryAreas=emptyList(),shippingEnabled=false) }
+        rows.firstOrNull { it.flag("available") }?.let { row ->
+            try {val detail=api.get("buyer/products/${row.text("productId")}").asJsonObject
+                set { it.copy(shippingEnabled=detail.flag("shippingEnabled"),deliveryAreas=detail.getAsJsonArray("serviceArea")?.map { a->a.asString }.orEmpty()) }
+            } catch(e:ApiFailure) {if(e.status !in setOf(404,409))throw e}
+        }
+    }
+    fun buyerCart() = run { loadBuyerCart() }
+    fun buyerSelectCart(id:String?,checked:Boolean) {
+        if(state.value.busy)return
+        val rows=state.value.cart.list("items")
+        val targets=if(id==null)rows.filter { it.flag("available") }.map { it.text("id") }.toSet() else rows.filter { it.text("id")==id && (!checked || it.flag("available")) }.map { it.text("id") }.toSet()
+        set { it.copy(buyerSelected=if(checked)it.buyerSelected+targets else if(id==null)emptySet() else it.buyerSelected-targets,buyerSelectionInitialized=true,fulfillment=null,quote=null,checkoutBody=null) }
+    }
+    fun buyerFulfillment(method:String) {require(method in setOf("pickup","delivery"));if(state.value.busy)return;set { it.copy(buyerFulfillment=method,fulfillment=null,quote=null,checkoutBody=null) }}
+    fun buyerQuantity(id:String,value:String) = run {
+        val row=state.value.cart.list("items").firstOrNull { it.text("id")==id } ?: error("Item tidak ditemukan.")
+        val amount=kg(value)
+        require(row.flag("available") && amount<=row.text("stockAvailable").toBigDecimal()) { "Jumlah melebihi stok tersedia." }
+        api.put("buyer/cart/items/$id",json("quantityKg" to amount));loadBuyerCart()
+    }
+    fun buyerDeleteSelected() = run {
+        val ids=state.value.buyerSelected.toList();require(ids.isNotEmpty()) { "Pilih produk dahulu." }
+        var failure:Exception?=null
+        try {ids.forEach { api.delete("buyer/cart/items/$it") }} catch(e:CancellationException){throw e} catch(e:Exception){failure=e}
+        loadBuyerCart()
+        if(failure!=null)error("Sebagian produk mungkin sudah dihapus. Periksa keranjang sebelum mencoba kembali.")
+    }
+    /** Order creation is acknowledged before optional cart cleanup; never create a second order to retry cleanup. */
+    fun buyerCheckout(done:()->Unit) = run {
+        val body=state.value.checkoutBody ?: error("Periksa total terlebih dahulu.")
+        require(state.value.quote?.flag("canCheckout")==true) { "Checkout belum diizinkan server." }
+        val orderedIds=body.list("items").map { it.text("productId") }.toSet()
+        val before=state.value.cart.list("items").filter { it.text("productId") in orderedIds }.map { it.deepCopy() }
+        val order=try {keyedPost("buyer/checkout",body).asJsonObject} catch(e:ApiFailure) {if(e.status in setOf(400,409))invalidateSchedules();throw e}
+        set { it.copy(detail=order,quote=null,checkoutBody=null,fulfillment=null,buyerCheckoutWarning=null,message="Pesanan ${order.text("orderId")} dibuat.") }
+        try {
+            val live=api.get("buyer/cart").asJsonObject
+            before.forEach { old ->
+                val current=live.list("items").firstOrNull { it.text("id")==old.text("id") && it.text("productId")==old.text("productId") }
+                if(current!=null) {
+                    if(current.text("quantityKg").toBigDecimal()==old.text("quantityKg").toBigDecimal()) api.delete("buyer/cart/items/${old.text("id")}")
+                    else set { it.copy(buyerCheckoutWarning="Pesanan sudah dibuat. Isi keranjang berubah; periksa kembali sebelum memesan lagi.") }
+                }
+            }
+            val remaining=api.get("buyer/cart").asJsonObject
+            set { it.copy(cart=remaining,buyerSelected=emptySet(),buyerSelectionInitialized=false) }
+        } catch(e:CancellationException){throw e} catch(e:Exception) {
+            set { it.copy(buyerCheckoutWarning="Pesanan sudah dibuat. Sebagian item mungkin masih ada di keranjang; periksa sebelum memesan lagi.") }
+        }
+        done()
+    }
+    private suspend fun loadBuyerNotifications(page:Int=0) {
+        val result=api.get("notifications?page=$page&size=50").asJsonObject
+        set { it.copy(notifications=if(page==0)result.list("items") else (it.notifications+result.list("items")).distinctBy { n->n.text("id") },
+            unreadNotificationCount=result.long("unreadCount"),buyerNotificationPage=page,buyerNotificationMore=(page+1)*50L<result.long("totalElements")) }
+    }
+    fun buyerNotifications(page:Int=0) = run {loadBuyerNotifications(page)}
+    fun buyerReadAll() = run {api.put("notifications/read-all",json());loadBuyerNotifications()}
+    fun buyerOpenNotification(notice:JsonObject,done:(String,String)->Unit) = run {
+        val id=notice.text("id");require(state.value.notifications.any { it.text("id")==id })
+        if(!notice.flag("isRead"))api.put("notifications/$id/read",json())
+        loadBuyerNotifications()
+        val link=buyerLink(notice.text("deepLink")) ?: return@run
+        when(link.first) {
+            "orders"->{val order=api.get("buyer/orders/${link.second}").asJsonObject
+                val route=when { order.obj("pendingScheduleChange").text("id").isNotBlank()->"schedule-decision";order.text("orderStatus")=="selesai"->"completed";order.text("orderStatus") in setOf("menunggu_pembayaran","pembayaran_ditolak")->"payment";else->"detail" }
+                done(route,link.second)
+            }
+            "refunds"->done("refund-detail",link.second)
+            "escalations"->done("ticket",link.second)
+        }
+    }
+
+
+    private fun requireAdmin() { require(state.value.user?.role=="admin") { "Gunakan akun administrator." } }
+    private fun adminSet(block:(AdminUiState)->AdminUiState) = set { it.copy(adminUi=block(it.adminUi)) }
+    fun loginAdmin(email:String,password:String) = run {
+        val session=api.login(email,password)
+        if(session.user.role!="admin") {
+            try {api.logout()} catch(e:CancellationException){throw e} catch(_:Exception){} // logout always clears local tokens
+            error("Akun ini bukan administrator. Gunakan halaman masuk sesuai peran Anda.")
+        }
+        mutable.value=ConnectedState(user=session.user,busy=true)
+    }
+    fun adminLoadHome() = run {
+        requireAdmin()
+        val queue=api.get("admin/farmers/verification-queue?page=0&size=3&status=menunggu&search=").asJsonObject
+        val disputes=api.get("admin/disputes?page=0&size=3").asJsonObject
+        val users=api.get("admin/users?page=0&size=1&status=suspended").asJsonObject
+        val audit=api.get("admin/audit-logs?page=0&size=5").asJsonObject
+        adminSet { it.copy(loaded=true,verificationCount=queue.long("totalElements"),disputeCount=disputes.long("totalElements"),suspendedCount=users.long("totalElements"),priorities=queue.list("items"),recentAudit=audit.list("items"),disputes=disputes.list("items")) }
+    }
+    private suspend fun adminLoadQueueSnapshot(status:String,search:String,page:Int) {
+        require(status in setOf("menunggu","disetujui","ditolak"));require(search.length<=100)
+        val r=api.get("admin/farmers/verification-queue?page=$page&size=50&status=${query(status)}&search=${query(search.trim())}").asJsonObject
+        adminSet { it.copy(queue=if(page==0)r.list("items") else (it.queue+r.list("items")).distinctBy { q->q.text("farmerId") },queueStatus=status,queueQuery=search,queuePage=page,queueMore=(page+1)*50L<r.long("totalElements"),queueTotal=r.long("totalElements"),verificationCount=if(status=="menunggu")r.long("totalElements") else it.verificationCount,verification=if(page==0)null else it.verification,verificationUser=if(page==0)"" else it.verificationUser) }
+    }
+    fun adminLoadQueue(status:String="menunggu",search:String="",page:Int=0) = run {requireAdmin();adminLoadQueueSnapshot(status,search,page)}
+    fun adminInspectFarmer(id:String) = run {
+        requireAdmin();adminSet { it.copy(verification=null,verificationUser=id) }
+        val result=api.get("admin/farmers/$id/verification").asJsonObject
+        adminSet {it.copy(verification=result)}
+    }
+    fun adminVerifySelected(approved:Boolean,reason:String,checked:Boolean) = run {
+        requireAdmin();val a=state.value.adminUi;val row=a.verification ?: error("Pilih dan periksa pengajuan dahulu.")
+        require(row.text("status")=="menunggu") { "Pengajuan sudah diputuskan. Muat ulang." }
+        require(!approved || checked && row.flag("hasDocument")) { "Lengkapi pemeriksaan dokumen dan data toko." }
+        require(approved || reason.trim().isNotEmpty()) { "Alasan penolakan wajib diisi." }
+        val latest=api.get("admin/farmers/${a.verificationUser}/verification").asJsonObject
+        require(latest.text("applicationId")==row.text("applicationId") && latest.text("submittedAt")==row.text("submittedAt") && latest.text("status")=="menunggu") {
+            adminSet { it.copy(verification=latest) }; "Pengajuan berubah. Periksa ulang data dan dokumen sebelum memutuskan."
+        }
+        api.put("admin/farmers/${a.verificationUser}/verify",json("approved" to approved,"rejectionReason" to reason.trim().takeIf { !approved }))
+        val acknowledged=row.deepCopy().apply{addProperty("status",if(approved)"disetujui" else "ditolak");addProperty("rejectionReason",if(approved)"" else reason.trim())}
+        adminSet {it.copy(verification=acknowledged)}
+        var message="Keputusan verifikasi tersimpan di server."
+        try {adminLoadQueueSnapshot(a.queueStatus,a.queueQuery,0)} catch(e:CancellationException){throw e} catch(_:Exception){message+=" Antrean belum dimuat ulang; perbarui sebelum tindakan berikutnya."}
+        set {it.copy(message=message)}
+    }
+    private suspend fun adminLoadUsersSnapshot(role:String,status:String,search:String,page:Int) {
+        require(role in setOf("","admin","petani","pembeli") && status in setOf("","active","suspended") && search.length<=100)
+        val filters="page=$page&size=50"+(if(role.isNotBlank())"&role=${query(role)}" else "")+(if(status.isNotBlank())"&status=${query(status)}" else "")+(if(search.isNotBlank())"&search=${query(search.trim())}" else "")
+        val r=api.get("admin/users?$filters").asJsonObject
+        adminSet { it.copy(users=if(page==0)r.list("items") else (it.users+r.list("items")).distinctBy { u->u.text("id") },usersRole=role,usersStatus=status,usersQuery=search,usersPage=page,usersMore=(page+1)*50L<r.long("totalElements"),user=if(page==0)null else it.user) }
+    }
+    fun adminLoadUsers(role:String="",status:String="",search:String="",page:Int=0,selected:String="") = run {
+        requireAdmin();adminLoadUsersSnapshot(role,status,search,page)
+        if(selected.isNotBlank()) {val u=api.get("admin/users/$selected").asJsonObject;adminSet {it.copy(user=u)}}
+    }
+    fun adminInspectUser(id:String) = run {requireAdmin();adminSet {it.copy(user=null)};val result=api.get("admin/users/$id").asJsonObject;adminSet {it.copy(user=result)}}
+    fun adminChangeUser(suspend:Boolean,reason:String) = run {
+        requireAdmin();val a=state.value.adminUi;val u=a.user ?: error("Pilih pengguna dahulu.")
+        require(u.text("role")!="admin" && u.text("id")!=state.value.user?.id) { "Akun admin tidak dapat disuspensi." }
+        require(reason.trim().isNotEmpty() && reason.length<=1000) { "Isi alasan tindakan maksimal 1000 karakter." }
+        api.put("admin/users/${u.text("id")}/suspend",json("suspend" to suspend,"reason" to reason.trim()))
+        val acknowledged=u.deepCopy().apply{addProperty("status",if(suspend)"suspended" else "active")}
+        adminSet {it.copy(user=acknowledged)}
+        var message="Status akun tersimpan di server."
+        try {
+            adminLoadUsersSnapshot(a.usersRole,a.usersStatus,a.usersQuery,0)
+            val result=api.get("admin/users/${u.text("id")}").asJsonObject;adminSet {it.copy(user=result)}
+        } catch(e:CancellationException){throw e} catch(_:Exception){adminSet {it.copy(user=acknowledged)};message+=" Daftar pengguna belum dimuat ulang."}
+        set {it.copy(message=message)}
+    }
+    fun adminLoadCommodities() = run {requireAdmin();val rows=api.get("admin/commodities").rows();adminSet {it.copy(commodities=rows)}}
+    fun adminSaveCommodity(id:String?,name:String,active:Boolean,done:()->Unit) = run {
+        requireAdmin();require(name.trim().isNotEmpty() && name.trim().length<=100) { "Isi nama komoditas maksimal 100 karakter." }
+        val body=json("name" to name.trim(),"isActive" to active)
+        val saved=(if(id==null)api.post("admin/commodities",body) else api.put("admin/commodities/$id",body)).asJsonObject
+        adminSet {it.copy(commodities=(it.commodities.filterNot { c->c.text("id")==saved.text("id") }+saved))};done()
+        var message="Komoditas tersimpan di server."
+        try {val rows=api.get("admin/commodities").rows();adminSet {it.copy(commodities=rows)}} catch(e:CancellationException){throw e} catch(_:Exception){message+=" Daftar belum dimuat ulang."}
+        set {it.copy(message=message)}
+    }
+    private suspend fun adminLoadDisputesSnapshot(page:Int) {
+        val r=api.get("admin/disputes?page=$page&size=50").asJsonObject
+        adminSet { it.copy(disputes=if(page==0)r.list("items") else (it.disputes+r.list("items")).distinctBy { d->d.text("id") },disputePage=page,disputeMore=(page+1)*50L<r.long("totalElements")) }
+    }
+    fun adminLoadDisputes(page:Int=0) = run {
+        requireAdmin()
+        val selected=state.value.adminUi.dispute?.text("id").orEmpty()
+        adminLoadDisputesSnapshot(page)
+        // Returning from evidence keeps the selected ticket and its saved form while refreshing server facts.
+        if(page==0 && selected.isNotBlank()) {
+            val dispute=api.get("admin/disputes/$selected").asJsonObject
+            val refund=api.get("admin/refunds/${dispute.text("refundId")}").asJsonObject
+            adminSet {it.copy(dispute=dispute,refund=refund)}
+        }
+    }
+    fun adminInspectDispute(id:String) = run {
+        requireAdmin();adminSet {it.copy(dispute=null,refund=null)}
+        val dispute=api.get("admin/disputes/$id").asJsonObject
+        val refund=api.get("admin/refunds/${dispute.text("refundId")}").asJsonObject
+        adminSet {it.copy(dispute=dispute,refund=refund)}
+    }
+    fun adminDecideSelected(approve:Boolean,reason:String) = run("Keputusan sengketa tersimpan. Status penerimaan dana tetap mengikuti konfirmasi pembeli.") {
+        requireAdmin();val d=state.value.adminUi.dispute ?: error("Pilih sengketa dahulu.")
+        require(d.text("status")=="terbuka") { "Sengketa sudah diputuskan." }
+        require(reason.trim().isNotEmpty() && reason.length<=1000) { "Isi alasan keputusan maksimal 1000 karakter." }
+        val result=api.put("admin/disputes/${d.text("id")}/decide",json("decision" to if(approve)"setujui_refund" else "tutup_sengketa","reason" to reason.trim())).asJsonObject
+        // Record the acknowledged decision before refreshing supplementary data.
+        adminSet {it.copy(dispute=result,decidedDisputes=(listOf(result)+it.decidedDisputes).distinctBy { x->x.text("id") })}
+        try {
+            adminLoadDisputesSnapshot(0)
+            val refund=api.get("admin/refunds/${d.text("refundId")}").asJsonObject;adminSet {it.copy(refund=refund)}
+        } catch(e:CancellationException){throw e} catch(_:Exception) {adminSet {it.copy(refund=null)} }
+    }
+    fun adminLoadEvidence(orderId:String) = run {requireAdmin();set {it.copy(proofs=emptyList())};val rows=api.get("admin/orders/$orderId/payment-proofs").rows();set {it.copy(proofs=rows)}}
+    fun adminLoadAudit(page:Int=0) = run {
+        requireAdmin();val r=api.get("admin/audit-logs?page=$page&size=50").asJsonObject
+        adminSet {it.copy(audit=if(page==0)r.list("items") else (it.audit+r.list("items")).distinctBy { x->x.text("id") },auditPage=page,auditMore=(page+1)*50L<r.long("totalElements"))}
+    }
+
     fun dismiss() = set { it.copy(error = null, message = null, image = null) }
     fun login(email: String, password: String) = run {
         val user = api.login(email, password).user
@@ -146,8 +398,6 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
         set { it.copy(products = if (page == 0) rows else (it.products + rows).distinctBy { p -> p.text("id") },
             page = page, more = (page + 1L) * 20 < result.long("totalElements")) }
     }
-<<<<<<< HEAD
-=======
     /** One serialized snapshot prevents tab loads from being dropped while another request is busy. */
     fun farmerWorkspace() = run {
         require(role == "petani") { "Gunakan akun petani." }
@@ -198,7 +448,6 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
         set { it.copy(products = it.products.filterNot { p -> p.text("id") == productId } + updated) }
         done()
     }
->>>>>>> 6e40a1e952f647007ba3c22c1e6b422e7b483f11
     fun cart() = run {
         val cart = api.get("buyer/cart").asJsonObject
         set { it.copy(cart = cart, fulfillment = null, quote = null, checkoutBody = null,
@@ -223,7 +472,7 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
         val cart = api.get("buyer/cart").asJsonObject
         set { it.copy(cart = cart, fulfillment = null, quote = null, checkoutBody = null) }
     }
-    private fun cartItems() = state.value.cart.list("items").map { p -> json("productId" to p.text("productId"), "quantityKg" to p.get("quantityKg")) }
+    private fun cartItems() = selectedBuyerRows(state.value.cart,state.value.buyerSelectionInitialized,state.value.buyerSelected).map { p -> json("productId" to p.text("productId"), "quantityKg" to p.get("quantityKg")) }
     fun clearQuote() = set { it.copy(quote = null, checkoutBody = null) }
     fun schedules(method: String, district: String) = run {
         val result = api.post("buyer/fulfillment-options", json("items" to cartItems(), "fulfillmentMethod" to method,
@@ -267,11 +516,11 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
         set { it.copy(orders = if (page == 0) result.list("items") else (it.orders + result.list("items")).distinctBy { o -> o.text("orderId") },
             page = page, more = (page + 1L) * 20 < result.long("totalElements")) }
     }
-    private suspend fun detail(id: String) {
+    private suspend fun detail(id: String, loadReview:Boolean = true) {
         val order = api.get("$role/orders/$id").asJsonObject
         set { it.copy(detail = order, options = emptyList(), destination = null, proofs = emptyList(), image = null,
             review = null, reviewLoaded = false) }
-        if (role == "buyer" && order.text("orderStatus") == "selesai") {
+        if (loadReview && role == "buyer" && order.text("orderStatus") == "selesai") {
             val review = api.get("buyer/orders/$id/review")
             set { it.copy(review = review.takeIf { value -> value.isJsonObject }?.asJsonObject, reviewLoaded = true) }
         }
@@ -317,7 +566,7 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
     private suspend fun loadBuyerTransaction(id: String) {
         require(role == "buyer")
         set { it.copy(detail = null, buyerTransactionLoaded = false, buyerQris = null) }
-        detail(id)
+        detail(id,false)
         val proofs = api.get("buyer/orders/$id/payment-proofs").rows()
         val order = state.value.detail!!
         val mayPay = order.text("orderStatus") !in setOf("menunggu_petani", "ditolak", "dibatalkan", "kedaluwarsa") && order.obj("pendingScheduleChange").text("id").isBlank() &&
@@ -378,6 +627,137 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
         buyerAddressStore.write(user.id, state.value.buyerAddresses, id)
         invalidateSchedules()
         set { it.copy(buyerAddressId = id) }
+    }
+    fun buyerReview(id: String) = run { loadBuyerReview(id) }
+    private suspend fun loadBuyerReview(id: String) {
+        set { it.copy(buyerReview=null,buyerReviewLoaded=false,buyerReviewAvailable=true) }
+        try {
+            val result=api.get("buyer/orders/$id/review")
+            set { it.copy(buyerReview=result.takeIf{v->v.isJsonObject}?.asJsonObject,buyerReviewLoaded=true) }
+        } catch(e: ApiFailure) {
+            // This endpoint exists on newer team backends. A missing route must not become fake success.
+            if(e.status !in setOf(404,405)) throw e
+            set { it.copy(buyerReviewLoaded=true,buyerReviewAvailable=false) }
+        }
+    }
+    fun buyerSubmitReview(id:String,rating:Int,tags:Set<String>,comment:String) = run("Ulasan berhasil dikirim.") {
+        require(state.value.detail?.let{it.text("orderId")==id && it.text("orderStatus")=="selesai"}==true){"Ulasan hanya untuk pesanan selesai."}
+        require(state.value.buyerReviewLoaded && state.value.buyerReviewAvailable && state.value.buyerReview==null){"Perbarui status ulasan terlebih dahulu."}
+        val text=buyerReviewComment(tags,comment)
+        require(rating in 1..5 && text.length<=500){"Pilih 1–5 bintang dan batasi komentar hingga 500 karakter."}
+        try {
+            val review=api.post("buyer/orders/$id/review",json("rating" to rating,"comment" to text.takeIf(String::isNotBlank))).asJsonObject
+            set { it.copy(buyerReview=review) }
+        } catch(e:ApiFailure) {
+            if(e.status in setOf(404,405)){set{it.copy(buyerReviewAvailable=false)};error("Layanan ulasan belum tersedia pada backend ini.")}
+            if(e.status==409){loadBuyerReview(id);if(state.value.buyerReview!=null)return@run}
+            throw e
+        }
+    }
+    fun buyerCompleted(id:String,includeDestination:Boolean=true)=run {
+        set{it.copy(detail=null,buyerTransactionLoaded=false)};detail(id,false);loadBuyerReview(id)
+        if(includeDestination){
+            val destination=try{api.get("buyer/orders/$id/payment-destination").takeIf{it.isJsonObject}?.asJsonObject}catch(e:ApiFailure){if(e.status==404)null else throw e}
+            set{it.copy(destination=destination)}
+        }
+    }
+    fun buyerSaveIdentity(name:String,phone:String)=run("Profil berhasil disimpan.") {
+        require(name.isNotBlank() && name.length<=255 && phone.length<=20){"Periksa nama dan nomor telepon."}
+        val current=api.get("auth/profile").asJsonObject
+        val saved=api.put("auth/profile",json("fullName" to name.trim(),"contactPhone" to phone.trim(),"deliveryAddress" to current.get("deliveryAddress"))).asJsonObject
+        set{it.copy(profile=saved)}
+    }
+    fun buyerRefundDetail(id:String)=run { loadBuyerRefund(id) }
+    private suspend fun loadBuyerRefund(id:String) {
+        set{it.copy(buyerRefund=null,buyerTicket=null,buyerTicketId=null,buyerTicketDraft=JsonObject())}
+        val refund=api.get("buyer/refunds/$id").asJsonObject
+        val user=state.value.user!!.id
+        set{it.copy(buyerRefund=refund,buyerTicketId=buyerHelpStore.ticket(user,id),buyerTicketPendingReason=buyerHelpStore.pendingReason(user,id))}
+    }
+    fun buyerConfirmRefund(id:String)=run("Dana dikonfirmasi diterima. Refund selesai.") {
+        require(state.value.buyerRefund?.let{it.text("id")==id && canConfirmBuyerRefund(it)}==true){"Refund belum menunggu konfirmasi dana."}
+        api.post("buyer/refunds/$id/confirm",json());loadBuyerRefund(id)
+    }
+    fun buyerCreateTicket(refundId:String,reason:String,done:(String)->Unit)=run {
+        val user=state.value.user!!.id
+        val pending=buyerHelpStore.pendingReason(user,refundId)
+        val text=pending ?: reason.trim()
+        require(text.isNotBlank() && text.length<=1000){"Jelaskan masalah maksimal 1000 karakter."}
+        val refund=state.value.buyerRefund ?: error("Muat detail refund terlebih dahulu.")
+        require(refund.text("id")==refundId && (pending!=null || canEscalateBuyerRefund(refund))){"Status refund tidak mengizinkan eskalasi baru."}
+        buyerHelpStore.pending(user,refundId,text)
+        set{it.copy(buyerTicketPendingReason=text)}
+        val path="buyer/refunds/$refundId/escalations";val body=json("reason" to text)
+        val ticket=api.post(path,body,key(path,body.toString())).asJsonObject
+        require(ticket.text("id").isNotBlank()){ "Tiket belum dikonfirmasi server. Coba lagi dengan alasan yang sama." }
+        buyerHelpStore.rememberTicket(user,refundId,ticket.text("id"))
+        buyerHelpStore.pending(user,refundId,null)
+        keys.complete(user,path,body.toString())
+        set{it.copy(buyerTicket=ticket,buyerTicketId=ticket.text("id"),buyerTicketPendingReason=null)}
+        done(ticket.text("id"))
+    }
+    fun buyerTicket(id:String)=run {
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,128}"))){"ID tiket tidak valid."}
+        set{it.copy(buyerTicket=null,buyerTicketDraft=JsonObject())}
+        val ticket=api.get("buyer/escalations/$id").asJsonObject
+        val refund=api.get("buyer/refunds/${ticket.text("refundId")}").asJsonObject
+        val user=state.value.user!!.id
+        buyerHelpStore.rememberTicket(user,refund.text("id"),id)
+        set{it.copy(buyerTicket=ticket,buyerRefund=refund,buyerTicketId=id,buyerTicketDraft=buyerHelpStore.draft(user,id))}
+    }
+    fun buyerTicketNote(id:String,note:String,uri:String?,name:String)=run("Catatan tambahan disimpan di perangkat. Bagikan ke CS melalui WhatsApp.") {
+        require(state.value.buyerTicket?.text("id")==id){"Muat tiket terlebih dahulu."}
+        require(note.length<=1000){"Catatan maksimal 1000 karakter."}
+        val user=state.value.user!!.id
+        buyerHelpStore.saveDraft(user,id,note,uri,name)
+        set{it.copy(buyerTicketDraft=buyerHelpStore.draft(user,id))}
+    }
+    fun buyerStore(productId:String)=run {
+        set{it.copy(buyerStore=null,buyerStoreProducts=emptyList(),buyerStoreReviews=emptyList())}
+        val detail=api.get("buyer/products/$productId").asJsonObject
+        val owner=detail.obj("product").text("farmerId")
+        require(owner.isNotBlank()){ "Identitas toko belum tersedia." }
+        val rows=mutableListOf<JsonObject>();var page=0
+        do {
+            val result=api.get("buyer/products?page=$page&size=100").asJsonObject
+            rows+=result.list("items").filter{it.text("farmerId")==owner};page++
+        } while(page*100L<result.long("totalElements"))
+        set{it.copy(buyerStore=detail,buyerStoreProducts=(rows+listOf(detail.obj("product"))).distinctBy{p->p.text("id")})}
+    }
+    /** Absolute targets persist across lost responses, so retrying a reorder does not double quantities. */
+    fun buyerReorder(id:String,done:()->Unit)=run("Produk ditambahkan ke keranjang dengan harga saat ini.") {
+        val user=state.value.user!!.id
+        var plan=buyerHelpStore.reorder(user,id)
+        if(plan==null){
+            val order=api.get("buyer/orders/$id").asJsonObject
+            require(order.text("orderStatus")=="selesai"){"Beli lagi tersedia untuk pesanan selesai."}
+            val cart=api.get("buyer/cart").asJsonObject
+            val owner=order.text("farmerId")
+            require(cart.list("items").isEmpty() || cart.list("items").all{it.text("farmerId")==owner}){"Keranjang berisi produk toko lain. Periksa keranjang terlebih dahulu."}
+            val targets=order.list("items").map{item->
+                val product=api.get("buyer/products/${item.text("productId")}").asJsonObject.obj("product")
+                val previous=cart.list("items").firstOrNull{it.text("productId")==item.text("productId")}?.text("quantityKg")?.toBigDecimalOrNull()?:java.math.BigDecimal.ZERO
+                val target=previous+(item.text("quantityKg").toBigDecimalOrNull()?:error("Jumlah produk tidak valid."))
+                require(product.flag("availableForPurchase") && (product.text("stockAvailable").toBigDecimalOrNull()?:java.math.BigDecimal.ZERO)>=target){"${item.text("productNameSnapshot")} belum tersedia dalam jumlah yang diminta. Keranjang tidak diubah."}
+                json("productId" to item.text("productId"),"target" to target)
+            }
+            require(targets.isNotEmpty()){ "Pesanan tidak memiliki produk." }
+            plan=json("items" to targets);buyerHelpStore.reorder(user,id,plan)
+        }
+        try {
+            for(item in plan.list("items")){
+                val cart=api.get("buyer/cart").asJsonObject
+                val current=cart.list("items").firstOrNull{it.text("productId")==item.text("productId")}
+                val target=item.text("target").toBigDecimal()
+                val quantity=current?.text("quantityKg")?.toBigDecimalOrNull()?:java.math.BigDecimal.ZERO
+                if(quantity<target){
+                    val updated=if(current!=null)api.put("buyer/cart/items/${current.text("id")}",json("quantityKg" to target))
+                        else api.post("buyer/cart/items",json("productId" to item.text("productId"),"quantityKg" to target))
+                    set{it.copy(cart=updated.asJsonObject)}
+                } else set{it.copy(cart=cart)}
+            }
+        }catch(e:CancellationException){throw e}catch(e:Exception){throw java.io.IOException("Periksa keranjang sebelum mencoba lagi. Sebagian produk mungkin sudah ditambahkan. ${e.message}",e)}
+        buyerHelpStore.reorder(user,id,null);invalidateSchedules();done()
     }
     fun payments(id: String) = run {
         if (role == "buyer") {

@@ -19,7 +19,7 @@ import id.panenku.app.data.remote.*
 import id.panenku.app.ui.connected.*
 
 @Composable internal fun BuyerCheckoutScreen(s: ConnectedState, vm: ConnectedViewModel, back: () -> Unit, addresses: () -> Unit, done: () -> Unit) {
-    var method by rememberSaveable { mutableStateOf(if(s.shippingEnabled) "delivery" else "pickup") }
+    var method by rememberSaveable { mutableStateOf(s.buyerFulfillment.takeIf { it=="pickup" || s.shippingEnabled } ?: "pickup") }
     var district by rememberSaveable(s.buyerAddressId) { mutableStateOf("") }
     var date by rememberSaveable { mutableStateOf(s.quote?.text("scheduledDate").orEmpty()) }
     var slot by rememberSaveable { mutableStateOf(s.quote?.text("scheduledTimeSlot").orEmpty()) }
@@ -29,11 +29,11 @@ import id.panenku.app.ui.connected.*
     val inArea = selectedDistrict in s.deliveryAreas
     val validAddress = method == "pickup" || (address != null && inArea && address.snapshot().length <= 2000)
     val quote = s.quote
-    val rows = s.cart.list("items")
+    val rows = selectedBuyerRows(s.cart,s.buyerSelectionInitialized,s.buyerSelected)
     BPage("Checkout","Periksa pesanan sebelum dibuat",back,brand=false,paper=FPaper,footer={
         Column(Modifier.fillMaxWidth().background(Color.White).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             FKeyValue("Total pesanan",quote?.let { money(it.long("totalPayment")) } ?: "Periksa total dahulu",true,14f)
-            BButton("Buat Pesanan",{ vm.checkout(done) },enabled=!s.busy && agreed && validAddress && quote?.flag("canCheckout") == true)
+            BButton("Buat Pesanan",{ vm.buyerCheckout(done) },enabled=!s.busy && agreed && validAddress && quote?.flag("canCheckout") == true)
         }
     }) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
