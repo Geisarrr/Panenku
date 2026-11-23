@@ -1030,6 +1030,9 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/auth/refresh` | Refresh access token | Publik |
 | GET | `/auth/me` | Lihat profil sendiri (tanpa sensitive data) | Semua role |
 | PUT | `/auth/profile` | Update profil sendiri | Semua role |
+| GET | `/notifications` | Daftar notifikasi milik sendiri | Semua role aktif/tersuspend |
+| PUT | `/notifications/{id}/read` | Tandai satu notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
+| PUT | `/notifications/read-all` | Tandai seluruh notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
 
 ### 2. Pembeli
 
@@ -1052,8 +1055,6 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/buyer/refunds` | Ajukan refund (maksimal 1 aktif per pesanan) | Pembeli |
 | GET | `/buyer/refunds` | Daftar refund sendiri | Pembeli |
 | POST | `/buyer/refunds/{id}/escalations` | Eskalasi refund ke admin | Pembeli |
-| GET | `/buyer/notifications` | Daftar notifikasi dalam aplikasi | Pembeli |
-| PUT | `/buyer/notifications/{id}/read` | Tandai notifikasi dibaca | Pembeli |
 
 ### 3. Petani
 
@@ -1402,7 +1403,7 @@ Bagian ini memisahkan **desain target** (isi README di atas) dari **kondisi kode
 | Admin (F7) | `GET /api/v1/admin/refunds`, `GET /api/v1/admin/refunds/{id}`, `GET /api/v1/admin/refunds/{id}/evidence`, `GET /api/v1/admin/refunds/{id}/transfer-proof`, `GET /api/v1/admin/disputes`, `GET /api/v1/admin/disputes/{id}`, `PUT /api/v1/admin/disputes/{id}/decide` |
 | Admin (laporan transfer terlambat) | `GET /api/v1/admin/late-payment-reports`, `GET /api/v1/admin/late-payment-reports/{id}`, `GET /api/v1/admin/late-payment-reports/{id}/evidence`, `PUT /api/v1/admin/late-payment-reports/{id}/review`, `PUT /api/v1/admin/late-payment-reports/{id}/close` |
 
-Sisanya (review, notifikasi, KTP asli dan integrasi UI) masih **direncanakan**.
+Sisanya (review, KTP asli, dan sebagian integrasi UI) masih **direncanakan**.
 
 #### Antrean KTP, pengguna, pengaturan dan audit admin
 
@@ -1543,9 +1544,9 @@ Admin meninjau melalui `PUT /api/v1/admin/late-payment-reports/{id}/review` deng
 
 ### Tabel yang sudah ada migrasinya
 
-`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`.
+`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`, `notifications`.
 
-Belum ada migrasi: `notifications` (target Tahap 3–4). Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
+Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
 
 ### Deviasi desain vs implementasi
 

@@ -11,6 +11,7 @@ import com.panenku.backend.common.security.ActorService
 import com.panenku.backend.common.exception.conflict
 import com.panenku.backend.modules.shared.repository.FarmerProfileRepository
 import com.panenku.backend.modules.shared.repository.UserRepository
+import com.panenku.backend.modules.shared.service.NotificationService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -25,7 +26,8 @@ class KtpVerificationService(
     private val userRepository: UserRepository,
     private val actors: ActorService,
     private val auditLogRepository: AuditLogRepository,
-    private val clock: Clock
+    private val clock: Clock,
+    private val notifications: NotificationService
 ) {
 
     fun verifyKtp(farmerId: UUID, adminId: UUID, request: KtpVerifyRequest): ApiResponse<Unit> {
@@ -51,7 +53,8 @@ class KtpVerificationService(
             farmerProfile.ktpRejectionReason = request.rejectionReason
         }
 
-        farmerProfile.ktpReviewedAt = clock.instant()
+        val reviewedAt = clock.instant()
+        farmerProfile.ktpReviewedAt = reviewedAt
         farmerProfile.ktpReviewedBy = adminId
 
         ktpRepository.save(farmerProfile)
@@ -67,6 +70,9 @@ class KtpVerificationService(
             reason = request.rejectionReason
         }
         auditLogRepository.save(auditLog)
+        notifications.create(farmerId, if (request.approved) "KTP disetujui" else "KTP ditolak",
+            if (request.approved) "Verifikasi KTP dan toko Anda telah disetujui." else "Pengajuan KTP ditolak. ${request.rejectionReason?.trim() ?: "Perbaiki data lalu ajukan kembali."}",
+            "verification", "/account/verification", reviewedAt)
 
         return successResponse(Unit, "Verifikasi KTP berhasil")
     }

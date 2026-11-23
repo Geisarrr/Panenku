@@ -24,7 +24,7 @@ class OrderScheduleService(private val actors: ActorService, private val users: 
     private val farmers: FarmerProfileRepository, private val orders: OrderRepository,
     private val items: OrderItemRepository, private val history: OrderStatusHistoryRepository,
     private val schedules: OrderScheduleRepository, private val scheduling: SchedulingService,
-    private val mapper: ObjectMapper, private val clock: Clock) {
+    private val mapper: ObjectMapper, private val clock: Clock, private val notifications: NotificationService) {
     @Transactional(readOnly = true)
     fun list(actor: UUID, role: String, id: UUID, page: Int, size: Int): PageDTO<ScheduleChangeDTO> {
         if (role !in setOf("petani","pembeli")) forbidden("Role tidak diizinkan.")
@@ -56,6 +56,8 @@ class OrderScheduleService(private val actors: ActorService, private val users: 
             current.scheduledTimeSlot,request.scheduledDate,slot,reason,"pending",now,null,null,null)
         schedules.insert(v,key,hash)
         record(order,actor,"petani","Usulan jadwal ${v.fromDate} ${v.fromSlot} menjadi ${v.proposedDate} ${v.proposedSlot} WIB. Alasan: $reason",now)
+        notifications.create(order.buyerId, "Usulan perubahan jadwal", "Petani mengusulkan jadwal pesanan #${order.id.toString().take(8)} menjadi ${v.proposedDate} ${v.proposedSlot} WIB.",
+            "schedule", "/orders/${order.id}/schedule", now)
         return v
     }
     @Transactional
@@ -79,6 +81,9 @@ class OrderScheduleService(private val actors: ActorService, private val users: 
         val now = now()
         schedules.decide(id,actor,target,reason,version,now)
         record(order,actor,"pembeli","Pembeli ${if (target == "accepted") "menyetujui" else "menolak"} usulan jadwal ${row.proposedDate} ${row.proposedSlot} WIB.${reason?.let { " Catatan: $it" } ?: ""}",now)
+        notifications.create(order.farmerId, if (target == "accepted") "Perubahan jadwal disetujui" else "Perubahan jadwal ditolak",
+            "Pembeli ${if (target == "accepted") "menyetujui" else "menolak"} usulan jadwal pesanan #${order.id.toString().take(8)}.",
+            "schedule", "/orders/${order.id}/schedule", now)
         return schedules.find(orderId,id)!!.view
     }
     private fun lock(actor: UUID, role: String, id: UUID): Order {

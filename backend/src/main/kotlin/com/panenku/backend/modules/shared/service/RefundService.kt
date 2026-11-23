@@ -36,6 +36,7 @@ import java.util.UUID
 class RefundService(
     private val actors: ActorService, private val orders: OrderRepository,
     private val refunds: RefundRepository, private val mapper: ObjectMapper, private val clock: Clock,
+    private val notifications: NotificationService,
     @Value("\${panenku.storage.local-dir:}") private val directory: String
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -71,6 +72,7 @@ class RefundService(
         val id = UUID.randomUUID()
         refunds.insert(NewRefund(id, orderId, actor, key, hash, cleanReason, path, order.totalPayment, type, cleanProvider, cleanAccount, cleanName, now))
         refunds.record(id, null, "diajukan", actor, "pembeli", "Pembeli mengajukan refund.", now)
+        notifications.create(order.farmerId, "Pengajuan refund baru", "Pembeli mengajukan refund untuk pesanan #${orderId.toString().take(8)}.", "refund", "/refunds/$id", now)
         return detail(findRefund(id).view)
     }
 
@@ -92,6 +94,8 @@ class RefundService(
         val now = now()
         refunds.respond(id, target, decision, reason, now)
         refunds.record(id, row.view.status, target, actor, "petani", reason, now)
+        notifications.create(row.view.buyerId, if (decision == "terima") "Refund disetujui petani" else "Refund ditolak petani",
+            "Refund untuk pesanan #${row.view.orderId.toString().take(8)} telah ${if (decision == "terima") "disetujui." else "ditolak."}", "refund", "/refunds/$id", now)
         return detail(findRefund(id).view)
     }
 
@@ -114,6 +118,7 @@ class RefundService(
         val now = now()
         refunds.saveTransfer(id, actor, key, hash, path, now)
         refunds.record(id, row.view.status, "menunggu_konfirmasi_dana", actor, "petani", "Petani mengirim bukti transfer balik.", now)
+        notifications.create(row.view.buyerId, "Bukti transfer refund tersedia", "Petani mengirim bukti transfer refund untuk pesanan #${row.view.orderId.toString().take(8)}.", "refund", "/refunds/$id", now)
         return detail(findRefund(id).view)
     }
 
@@ -127,6 +132,7 @@ class RefundService(
         val now = now()
         refunds.confirm(id, now)
         refunds.record(id, row.view.status, "selesai", actor, "pembeli", "Pembeli mengonfirmasi dana diterima.", now)
+        notifications.create(row.view.farmerId, "Refund selesai", "Pembeli mengonfirmasi dana refund untuk pesanan #${row.view.orderId.toString().take(8)} telah diterima.", "refund", "/refunds/$id", now)
         return detail(findRefund(id).view)
     }
 
@@ -153,6 +159,8 @@ class RefundService(
         refunds.insertDispute(NewDispute(disputeId, id, actor, key, hash, reason, row.view.status, now))
         refunds.updateStatus(id, "dieskalasi", now)
         refunds.record(id, row.view.status, "dieskalasi", actor, "pembeli", reason, now)
+        notifications.create(row.view.farmerId, "Refund dieskalasi", "Pembeli meminta peninjauan admin untuk refund pesanan #${row.view.orderId.toString().take(8)}.", "refund", "/refunds/$id", now)
+        notifications.createForActiveAdmins("Sengketa refund baru", "Refund pesanan #${row.view.orderId.toString().take(8)} menunggu keputusan admin.", "refund", "/admin/disputes/$disputeId", now)
         return findDispute(disputeId).view
     }
 
@@ -177,6 +185,9 @@ class RefundService(
         refunds.updateStatus(refund.view.id, target, now)
         refunds.record(refund.view.id, refund.view.status, target, actor, "admin", reason, now)
         refunds.auditDispute(actor, disputeId, if (decision == "setujui_refund") "REFUND_DISPUTE_APPROVED" else "REFUND_DISPUTE_CLOSED", reason, now)
+        val decisionTitle = if (decision == "setujui_refund") "Admin menyetujui refund" else "Admin menutup sengketa refund"
+        notifications.create(refund.view.buyerId, decisionTitle, "Admin telah memutuskan sengketa refund pesanan #${refund.view.orderId.toString().take(8)}.", "refund", "/refunds/${refund.view.id}", now)
+        notifications.create(refund.view.farmerId, decisionTitle, "Admin telah memutuskan sengketa refund pesanan #${refund.view.orderId.toString().take(8)}.", "refund", "/refunds/${refund.view.id}", now)
         return findDispute(disputeId).view
     }
 

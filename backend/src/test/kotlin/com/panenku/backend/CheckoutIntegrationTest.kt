@@ -83,6 +83,7 @@ class CheckoutIntegrationTest {
     @Autowired lateinit var paymentDestinations: com.panenku.backend.modules.shared.service.PaymentDestinationService
     @Autowired lateinit var farmerPaymentMethods: com.panenku.backend.modules.petani.service.FarmerPaymentMethodService
     @Autowired lateinit var paymentSubmissions: com.panenku.backend.modules.shared.service.PaymentSubmissionService
+    @Autowired lateinit var notifications: com.panenku.backend.modules.shared.service.NotificationService
     @Autowired lateinit var refunds: com.panenku.backend.modules.shared.service.RefundService
     @Autowired lateinit var latePayments: com.panenku.backend.modules.shared.service.LatePaymentReportService
     @Autowired lateinit var dummyKtp: com.panenku.backend.modules.petani.service.DummyKtpService
@@ -129,6 +130,26 @@ class CheckoutIntegrationTest {
     fun deliveryRequest(quantity: String = "0.75"): CheckoutRequest = request(quantity).copy(
         fulfillmentMethod = "delivery", expectedDeliveryFee = 10000,
         deliveryAddress = "Alamat dummy", deliveryDistrict = "kepanjen")
+
+    @Test fun `checkout creates private notification and recipient can mark it read`() {
+        val order = checkout.checkout(buyer, "notification-${UUID.randomUUID()}", request())
+        val notificationId = db.queryForObject("SELECT id FROM notifications WHERE user_id=? AND type='order'", UUID::class.java, farmer)!!
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(1))
+            .andExpect(jsonPath("$.data.unreadCount").value(1))
+            .andExpect(jsonPath("$.data.items[0].deepLink").value("/orders/${order.orderId}"))
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(0))
+        mvc.perform(put("/api/v1/notifications/$notificationId/read").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isNotFound)
+        mvc.perform(put("/api/v1/notifications/$notificationId/read").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.isRead").value(true))
+        mvc.perform(get("/api/v1/notifications").param("unreadOnly", "true").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(0))
+        db.update("UPDATE users SET status='suspended' WHERE id=?", farmer)
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(1))
+    }
     /**
      * Membuat pesanan lalu memaksa status lewat SQL. Status pemenuhan F5 membutuhkan
      * pembayaran terverifikasi, sedangkan endpoint F6 belum tersedia.
@@ -1305,7 +1326,7 @@ class CheckoutIntegrationTest {
         val order = awaitingPayment()
         val offline = com.panenku.backend.modules.shared.service.PaymentSubmissionService(
             actors, orderRepository, orderHistoryRepository, db, userRepository, farmerProfileRepository,
-            productRepository, stockReservationRepository, paymentDestinations, mapper, clock, scheduleGuard, "")
+            productRepository, stockReservationRepository, paymentDestinations, mapper, clock, scheduleGuard, notifications, "")
         val error = assertThrows(ApiException::class.java) {
             org.springframework.transaction.support.TransactionTemplate(transactionManager).execute {
                 offline.submit(buyer, order, "proof-no-storage", qrisUpload())
