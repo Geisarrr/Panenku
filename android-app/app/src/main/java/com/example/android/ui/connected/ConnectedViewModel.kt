@@ -9,6 +9,7 @@ import id.panenku.app.BuildConfig
 import id.panenku.app.data.remote.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import id.panenku.app.ui.connected.buyer.*
 import java.security.MessageDigest
 
 /** All active screens use this state; legacy SampleData is never copied into it. */
@@ -21,10 +22,14 @@ data class ConnectedState(
     val proofs: List<JsonObject> = emptyList(), val fulfillment: JsonObject? = null,
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
     val image: ByteArray? = null, val profile: JsonObject? = null,
-    val page: Int = 0, val more: Boolean = false
+    val page: Int = 0, val more: Boolean = false,
+    val deliveryAreas: List<String> = emptyList(), val shippingEnabled: Boolean = false,
+    val buyerAddresses: List<SavedBuyerAddress> = emptyList(), val buyerAddressId: String? = null,
+    val buyerTransactionLoaded: Boolean = false, val buyerQris: ByteArray? = null, val buyerQrisId: String? = null
 )
-class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
-    private val api = PanenkuApi(BuildConfig.API_BASE_URL)
+class ConnectedViewModel @JvmOverloads constructor(app: Application,
+    private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
+    private val buyerAddressStore = BuyerAddressStore(app)
     private val prefs = app.getSharedPreferences("request_keys", 0)
     private val keys = RequestKeys({ prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).commit(); Unit }, { prefs.edit().remove(it).commit(); Unit })
     private val mutable = MutableStateFlow(ConnectedState())
@@ -35,7 +40,7 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         if (state.value.busy) return
         viewModelScope.launch {
             set { it.copy(busy = true, error = null, message = null) }
-            try { block(); set { it.copy(message = message) } }
+            try { block(); if (message != null) set { it.copy(message = message) } }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (api.session == null && state.value.user != null) mutable.value = ConnectedState(error = "Sesi berakhir. Silakan masuk kembali.")
@@ -62,9 +67,19 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         set { it.copy(products = if (page == 0) rows else (it.products + rows).distinctBy { p -> p.text("id") },
             page = page, more = (page + 1L) * 20 < result.long("totalElements")) }
     }
-    fun cart() = run { val cart = api.get("buyer/cart").asJsonObject; set { it.copy(cart = cart) } }
+    fun cart() = run {
+        val cart = api.get("buyer/cart").asJsonObject
+        set { it.copy(cart = cart, fulfillment = null, quote = null, checkoutBody = null,
+            deliveryAreas = emptyList(), shippingEnabled = false) }
+        cart.list("items").firstOrNull()?.let { first ->
+            val product = api.get("buyer/products/${first.text("productId")}").asJsonObject
+            set { it.copy(deliveryAreas = product.getAsJsonArray("serviceArea")?.map { area -> area.asString }.orEmpty(),
+                shippingEnabled = product.flag("shippingEnabled")) }
+        }
+    }
     fun add(product: String, quantity: String) = run("Keranjang tersimpan di server.") {
         api.post("buyer/cart/items", json("productId" to product, "quantityKg" to kg(quantity)))
+        invalidateSchedules()
     }
     fun quantity(id: String, quantity: String) = run("Keranjang diperbarui.") {
         api.put("buyer/cart/items/$id", json("quantityKg" to kg(quantity)))
@@ -83,15 +98,15 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
             "deliveryDistrict" to district.takeIf { method == "delivery" })).asJsonObject
         set { it.copy(fulfillment = result, quote = null, checkoutBody = null) }
     }
-    fun preview(method: String, district: String, address: String, date: String, slot: String) = run {
+    fun preview(method: String, district: String, address: String, date: String, slot: String, notes: String = "") = run {
         val result = api.post("buyer/checkout/preview", json("items" to cartItems(), "fulfillmentMethod" to method,
             "deliveryDistrict" to district.takeIf { method == "delivery" }, "deliveryAddress" to address.takeIf { method == "delivery" },
-            "scheduledDate" to date, "scheduledTimeSlot" to slot)).asJsonObject
+            "scheduledDate" to date, "scheduledTimeSlot" to slot, "buyerNotes" to notes.takeIf(String::isNotBlank))).asJsonObject
         val items = result.list("items").map { json("productId" to it.text("productId"), "quantityKg" to it.get("quantityKg"), "expectedPricePerKg" to it.long("pricePerKg")) }
         val body = json("items" to items, "fulfillmentMethod" to method, "scheduledDate" to date, "scheduledTimeSlot" to slot,
             "expectedDeliveryFee" to result.long("deliveryFee"), "deliveryDistrict" to district.takeIf { method == "delivery" },
             "deliveryAddress" to address.takeIf { method == "delivery" }, "expectedFulfillmentToken" to result.text("expectedFulfillmentToken"),
-            "expectedCheckoutToken" to result.text("quoteToken"))
+            "expectedCheckoutToken" to result.text("quoteToken"), "buyerNotes" to notes.takeIf(String::isNotBlank))
         set { it.copy(quote = result, checkoutBody = body) }
     }
     private fun key(path: String, payload: String) = keys.key(state.value.user?.id ?: error("Masuk terlebih dahulu."), path, payload)
@@ -103,7 +118,15 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
     fun checkout(done: () -> Unit) = run {
         val body = state.value.checkoutBody ?: error("Periksa total terlebih dahulu.")
         require(state.value.quote?.flag("canCheckout") == true) { "Checkout belum diizinkan server." }
-        val order = keyedPost("buyer/checkout", body).asJsonObject
+        val order = try { keyedPost("buyer/checkout", body).asJsonObject }
+        catch (e: ApiFailure) {
+            if (e.status in listOf(400, 409)) {
+                invalidateSchedules()
+                throw ApiFailure(e.status, "${e.message} Muat ulang keranjang, pilih jadwal dan periksa total kembali sebelum menyetujui.")
+            }
+            // A lost response may already have created an order. Keep body and key for a safe retry.
+            throw e
+        }
         set { it.copy(detail = order, quote = null, checkoutBody = null, cart = JsonObject(), fulfillment = null, message = "Pesanan ${order.text("orderId")} dibuat.") }
         done()
     }
@@ -140,6 +163,73 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         val body = json("expectedScheduleVersion" to proposal.long("baseVersion"), "decision" to if (accepted) "terima" else "tolak", "reason" to reason)
         api.put("buyer/orders/$id/schedule-changes/${proposal.text("id")}/decision", body); detail(id)
     }
+    /** One serialized transaction refresh: no concurrent requests dropped by the busy guard. */
+    fun buyerTransaction(id: String) = run { loadBuyerTransaction(id) }
+    private suspend fun loadBuyerTransaction(id: String) {
+        require(role == "buyer")
+        set { it.copy(detail = null, buyerTransactionLoaded = false, buyerQris = null) }
+        detail(id)
+        val proofs = api.get("buyer/orders/$id/payment-proofs").rows()
+        val order = state.value.detail!!
+        val mayPay = order.text("orderStatus") !in setOf("menunggu_petani", "ditolak", "dibatalkan", "kedaluwarsa") && order.obj("pendingScheduleChange").text("id").isBlank() &&
+            (order.text("orderStatus") != "menunggu_pembayaran" || runCatching { java.time.Instant.parse(order.text("expiresAt")).isAfter(java.time.Instant.now()) }.getOrDefault(false))
+        val options = if (mayPay) api.get("buyer/orders/$id/payment-options").rows() else emptyList()
+        val refunds = mutableListOf<JsonObject>()
+        var page = 0
+        do {
+            val result = api.get("buyer/refunds?page=$page&size=100").asJsonObject
+            refunds += result.list("items")
+            page++
+        } while (page * 100L < result.long("totalElements"))
+        // Destination may not exist until the buyer chooses one. Only 404 is optional.
+        val destination = if (!mayPay) null else try { api.get("buyer/orders/$id/payment-destination").takeIf { it.isJsonObject }?.asJsonObject }
+            catch (e: ApiFailure) { if (e.status == 404) null else throw e }
+        set { it.copy(proofs = proofs, options = options, refunds = refunds, destination = destination, buyerTransactionLoaded = true) }
+    }
+    fun buyerProof(id: String, uri: String) = run("Bukti dikirim untuk diperiksa petani.") {
+        require(state.value.detail?.let { it.text("orderId") == id && canUploadBuyerProof(it) } == true) { "Unggah bukti belum tersedia. Perbarui status pesanan." }
+        upload("buyer/orders/$id/payment-proof", uri)
+        loadBuyerTransaction(id)
+    }
+    fun buyerReceive(id: String) = run("Penerimaan tersimpan.") {
+        require(state.value.detail?.let { it.text("orderId") == id && it.text("orderStatus") == "menunggu_penerimaan" } == true) { "Status pesanan belum mengizinkan konfirmasi." }
+        api.post("buyer/orders/$id/receive", json())
+        loadBuyerTransaction(id)
+    }
+    fun buyerQris(id: String, method: String) = run {
+        val bytes = api.image("buyer/orders/$id/payment-options/$method/qris")
+        set { it.copy(buyerQris = bytes, buyerQrisId = method) }
+    }
+    fun buyerAddresses() = run {
+        val user = state.value.user ?: error("Masuk terlebih dahulu.")
+        val profile = api.get("auth/profile").asJsonObject
+        val rows = buyerAddressStore.seed(user.id, profile)
+        set { it.copy(profile = profile, buyerAddresses = rows, buyerAddressId = buyerAddressStore.selected(user.id)) }
+    }
+    fun saveBuyerAddress(address: SavedBuyerAddress, main: Boolean) = run("Alamat disimpan di perangkat ini.") {
+        require(address.label.isNotBlank() && address.recipient.isNotBlank() && address.phone.isNotBlank() && address.address.isNotBlank()) { "Lengkapi data alamat." }
+        require(address.snapshot().length <= 2000) { "Alamat terlalu panjang (maksimal 2000 karakter)." }
+        val user = state.value.user ?: error("Masuk terlebih dahulu.")
+        val rows = (state.value.buyerAddresses.filterNot { it.id == address.id } + address)
+        val selected = if (main || state.value.buyerAddressId == null) address.id else state.value.buyerAddressId
+        if (selected == address.id) savePrimaryBuyerAddress(address)
+        buyerAddressStore.write(user.id, rows, selected)
+        invalidateSchedules()
+        set { it.copy(buyerAddresses = rows, buyerAddressId = selected) }
+    }
+    private suspend fun savePrimaryBuyerAddress(address: SavedBuyerAddress) {
+        val owner = api.get("auth/profile").asJsonObject
+        val profile = api.put("auth/profile", json("fullName" to owner.text("fullName"), "contactPhone" to owner.text("contactPhone"), "deliveryAddress" to address.address)).asJsonObject
+        set { it.copy(profile = profile) }
+    }
+    fun selectBuyerAddress(id: String) = run {
+        val user = state.value.user ?: error("Masuk terlebih dahulu.")
+        val address = state.value.buyerAddresses.firstOrNull { it.id == id } ?: error("Alamat tidak ditemukan.")
+        savePrimaryBuyerAddress(address)
+        buyerAddressStore.write(user.id, state.value.buyerAddresses, id)
+        invalidateSchedules()
+        set { it.copy(buyerAddressId = id) }
+    }
     fun payments(id: String) = run {
         if (role == "buyer") {
             val options = api.get("buyer/orders/$id/payment-options").rows()
@@ -150,7 +240,7 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
             set { it.copy(proofs = proofs, destination = destination) }
         }
     }
-    fun choosePayment(id: String, method: String) = run("Tujuan pembayaran dipilih.") {
+    fun choosePayment(id: String, method: String) = run {
         val destination = api.put("buyer/orders/$id/payment-destination", json("paymentMethodId" to method)).asJsonObject
         set { it.copy(destination = destination) }
     }
