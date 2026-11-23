@@ -67,6 +67,56 @@ class LocalProductPhotoIntegrationTest {
             f.request().copy(items=listOf(com.panenku.backend.modules.pembeli.dto.CheckoutItemRequest(product.id,BigDecimal.ONE,25000))))
         assertEquals(25000L,order.totalPayment)
     }
+    @Test fun `F1 publication requires approved KTP complete payment positive stock and uploaded local photo`() {
+        val product = draft()
+        fun publish(stock: BigDecimal = BigDecimal.TEN) = f.productService.save(f.farmer, product.id,
+            ProductRequest(f.commodity, "Sawi Lokal", 25000, stock, f.date, "aktif"))
+        assertThrows(com.panenku.backend.common.exception.ApiException::class.java) { publish() }
+        photos.upload(f.farmer, product.id, file())
+        f.db.update("UPDATE farmer_profiles SET ktp_status='menunggu' WHERE id=?", f.farmer)
+        assertThrows(com.panenku.backend.common.exception.ApiException::class.java) { publish() }
+        f.db.update("UPDATE farmer_profiles SET ktp_status='disetujui' WHERE id=?", f.farmer)
+        f.db.update("UPDATE farmer_payment_methods SET is_active=false WHERE farmer_id=?", f.farmer)
+        assertThrows(com.panenku.backend.common.exception.ApiException::class.java) { publish() }
+        f.db.update("UPDATE farmer_payment_methods SET is_active=true WHERE farmer_id=?", f.farmer)
+        assertThrows(com.panenku.backend.common.exception.ApiException::class.java) { publish(BigDecimal.ZERO) }
+        assertTrue(publish().availableForPurchase)
+    }
+
+    @Test fun `F1 to F4 local photo cart schedule preview and idempotent checkout keep server amounts`() {
+        val product = draft()
+        photos.upload(f.farmer, product.id, file())
+        f.productService.save(f.farmer, product.id, ProductRequest(f.commodity, "Sawi Lokal", 25000, BigDecimal.TEN, f.date, "aktif"))
+        val cart = f.cart.add(f.buyer, com.panenku.backend.modules.pembeli.dto.CartItemRequest(product.id, BigDecimal("0.25")))
+        assertEquals(1, cart.items.size)
+        val options = f.mvc.perform(post("/api/v1/buyer/fulfillment-options")
+            .with(jwt().jwt { it.subject(f.buyer.toString()) }).contentType("application/json")
+            .content("""{"items":[{"productId":"${product.id}","quantityKg":0.25}],"fulfillmentMethod":"pickup"}"""))
+            .andExpect(status().isOk).andReturn().response.contentAsString
+        val scheduled = f.mapper.readTree(options).path("data").path("dates").first()
+        val body = """{"items":[{"productId":"${product.id}","quantityKg":0.25}],"fulfillmentMethod":"pickup","scheduledDate":"${scheduled.path("date").asText()}","scheduledTimeSlot":"${scheduled.path("timeSlots").first().asText()}"}"""
+        val preview = f.mvc.perform(post("/api/v1/buyer/checkout/preview")
+            .with(jwt().jwt { it.subject(f.buyer.toString()) }).contentType("application/json").content(body))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.subtotalItems").value(6250))
+            .andExpect(jsonPath("$.data.deliveryFee").value(0)).andExpect(jsonPath("$.data.totalPayment").value(6250))
+            .andExpect(jsonPath("$.data.transactionLimitApplied").value(10000000))
+            .andReturn().response.contentAsString
+        val quote = f.mapper.readTree(preview).path("data")
+        val request = f.mapper.readTree(body) as com.fasterxml.jackson.databind.node.ObjectNode
+        (request.path("items").first() as com.fasterxml.jackson.databind.node.ObjectNode).put("expectedPricePerKg", 25000)
+        request.put("expectedDeliveryFee", 0).put("expectedCheckoutToken", quote.path("quoteToken").asText())
+            .put("expectedFulfillmentToken", quote.path("expectedFulfillmentToken").asText())
+        val key = UUID.randomUUID().toString()
+        val responses = (1..2).map {
+            f.mvc.perform(post("/api/v1/buyer/checkout").with(jwt().jwt { it.subject(f.buyer.toString()) })
+                .header("Idempotency-Key", key).contentType("application/json").content(request.toString()))
+                .andExpect(status().isCreated).andExpect(jsonPath("$.data.totalPayment").value(6250))
+                .andReturn().response.contentAsString
+        }
+        assertEquals(f.mapper.readTree(responses[0]).path("data"), f.mapper.readTree(responses[1]).path("data"))
+        assertEquals(1, f.db.queryForObject("SELECT count(*) FROM orders", Int::class.java))
+    }
+
     @Test fun `unsigned tampered expired and cross product image URLs are refused`() {
         val photo = photos.upload(f.farmer,draft().id,file())
         val url = URI(photo.photoAccessUrl)

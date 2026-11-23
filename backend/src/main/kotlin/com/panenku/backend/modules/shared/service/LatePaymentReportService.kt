@@ -36,6 +36,7 @@ import java.util.UUID
 class LatePaymentReportService(
     private val actors: ActorService, private val orders: OrderRepository,
     private val reports: LatePaymentReportRepository, private val mapper: ObjectMapper, private val clock: Clock,
+    private val notifications: NotificationService,
     @Value("\${panenku.storage.local-dir:}") private val directory: String
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -64,6 +65,8 @@ class LatePaymentReportService(
         val id = UUID.randomUUID()
         val now = now()
         reports.insert(NewLateReport(id, orderId, actor, key, hash, cleanReason, claimedAmount, path, now))
+        notifications.createForActiveAdmins("Laporan transfer terlambat", "Laporan untuk pesanan #${orderId.toString().take(8)} menunggu pemeriksaan.",
+            "late_payment", "/admin/late-payment-reports/$id", now)
         return find(id).view
     }
 
@@ -83,6 +86,9 @@ class LatePaymentReportService(
         val status = if (decision == "tindak_lanjut") "tindak_lanjut" else "ditutup"
         reports.review(id, actor, decision, reason, status, now)
         reports.audit(actor, id, "LATE_PAYMENT_REVIEWED", row.view.status, status, reason, now)
+        notifications.create(row.view.buyerId, "Laporan transfer diperiksa",
+            if (decision == "tindak_lanjut") "Admin akan menindaklanjuti laporan transfer Anda." else "Admin menilai bukti laporan transfer belum cukup.",
+            "late_payment", "/late-payment-reports/$id", now)
         return find(id).view
     }
 
@@ -99,6 +105,8 @@ class LatePaymentReportService(
         val now = now()
         reports.close(id, actor, reason, now)
         reports.audit(actor, id, "LATE_PAYMENT_CLOSED", row.view.status, "ditutup", reason, now)
+        notifications.create(row.view.buyerId, "Laporan transfer ditutup", "Admin telah menutup laporan transfer Anda.",
+            "late_payment", "/late-payment-reports/$id", now)
         return find(id).view
     }
 

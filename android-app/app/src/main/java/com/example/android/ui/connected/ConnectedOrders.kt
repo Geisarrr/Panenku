@@ -48,6 +48,7 @@ import id.panenku.app.ui.components.*
             if (buyer) {
                 if (status == "menunggu_petani") item { SecondaryButton("Batalkan pesanan", { vm.cancel(id, reason) }) }
                 if (status == "menunggu_penerimaan") item { PrimaryButton("Konfirmasi barang diterima", { receiveConfirmation = true }) }
+                if (status == "selesai") item { ReviewForm(s, vm, id) }
                 if (status in listOf("selesai", "gagal_dipenuhi")) item { SecondaryButton("Ajukan refund", refund) }
                 if (status in listOf("menunggu_pembayaran", "verifikasi_pembayaran")) {
                     item { Panel("Pembayaran langsung ke petani") {
@@ -167,5 +168,28 @@ import id.panenku.app.ui.components.*
                 dismissButton = { TextButton(onClick = { confirm = false }) { Text("Kembali") } })
         }
         if (s.more) item { SecondaryButton("Muat refund berikutnya", { vm.refunds(s.page + 1) }) }
+    }
+}
+
+@Composable private fun ReviewForm(s: ConnectedState, vm: ConnectedViewModel, id: String) {
+    var rating by rememberSaveable(id) { mutableStateOf(0) }
+    var comment by rememberSaveable(id) { mutableStateOf("") }
+    Panel("Ulasan pesanan") {
+        if (!s.reviewLoaded) {
+            Text("Muat status ulasan sebelum mengirim.")
+            SecondaryButton("Muat ulasan", { vm.order(id) }, enabled = !s.busy)
+        } else if (s.review != null) {
+            Text("Ulasan terkirim")
+            Text("${s.review.long("rating")} / 5")
+            Text(s.review.text("comment"))
+        } else {
+            Text("Bintang wajib; komentar opsional maksimal 500 karakter.")
+            androidx.compose.foundation.layout.Row {
+                (1..5).forEach { star -> FilterChip(rating == star, { rating = star }, { Text("$star ★") }) }
+            }
+            Field("Komentar", comment, { comment = it }, multiline = true)
+            Text("${comment.length}/500")
+            PrimaryButton("Kirim ulasan", { vm.review(id, rating, comment) }, !s.busy && rating in 1..5 && comment.length <= 500)
+        }
     }
 }

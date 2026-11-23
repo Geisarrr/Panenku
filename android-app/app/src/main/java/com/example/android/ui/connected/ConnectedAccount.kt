@@ -1,6 +1,11 @@
 package id.panenku.app.ui.connected
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,14 +32,24 @@ import id.panenku.app.ui.components.*
             Field("Stok fisik (kg)", stock, { stock = it })
             Field("Tanggal siap (YYYY-MM-DD)", date, { date = it })
             Field("Deskripsi", description, { description = it }, multiline = true)
-            listOf("draft" to "Draf", "aktif" to "Aktif", "nonaktif" to "Nonaktif").forEach { (value, label) ->
+            (if (product == null) listOf("draft" to "Draf") else listOf("draft" to "Draf", "aktif" to "Aktif", "nonaktif" to "Nonaktif")).forEach { (value, label) ->
                 FilterChip(status == value, { status = value }, { Text(label) })
             }
             Text("Produk aktif memerlukan foto, toko lengkap, metode pembayaran, dan verifikasi sesuai aturan server.")
+            s.profile?.let { profile ->
+                if (profile.text("pickupLocation").isBlank()) Text("Belum bisa terbit: lengkapi lokasi pengambilan di Akun.")
+                if (s.paymentMethods.isEmpty()) Text("Belum bisa terbit: tambahkan metode pembayaran toko di Akun.")
+            }
             if (product != null) {
+                if (product.text("photoAccessUrl").isNotBlank()) AsyncImage(product.text("photoAccessUrl"),
+                    "Foto produk tersimpan", Modifier.fillMaxWidth().height(180.dp))
+                if (!product.flag("farmerVerified")) Text("Belum bisa terbit: KTP petani belum disetujui.")
+                if (product.text("photoAccessUrl").isBlank()) Text("Belum bisa terbit: unggah foto produk terlebih dahulu.")
+                if (stock.replace(',', '.').toBigDecimalOrNull()?.signum() != 1) Text("Belum bisa terbit: stok harus lebih dari nol.")
+                Text("Jika publikasi ditolak, alasan dari server ditampilkan agar data dapat diperbaiki.")
                 MediaPicker("Foto produk (JPEG/PNG, maks. 5 MB)", image, { image = it })
                 SecondaryButton("Unggah foto produk", { image?.let { vm.productPhoto(product.text("id"), it) } }, enabled = image != null)
-            } else Text("Simpan sebagai draf dahulu, lalu buka edit untuk mengunggah foto.")
+            } else Text("Simpan sebagai draf dahulu, lalu buka edit untuk memilih dan mengunggah foto. Setelah foto tersimpan, pilih Aktif untuk publikasi.")
             val amount = price.toLongOrNull()
             val quantity = stock.replace(',', '.').toBigDecimalOrNull()
             PrimaryButton("Simpan produk", {
@@ -45,11 +60,15 @@ import id.panenku.app.ui.components.*
         } }
     }
 }
-@Composable internal fun ConnectedAccount(s: ConnectedState, vm: ConnectedViewModel) {
+@Composable internal fun ConnectedAccount(s: ConnectedState, vm: ConnectedViewModel, onNotifications: () -> Unit = {}) {
     val farmer = s.user?.role == "petani"
     val admin = s.user?.role == "admin"
     Page("Akun", s.user?.email.orEmpty()) {
-        item { Text("Peran: ${s.user?.role}"); SecondaryButton("Perbarui profil", vm::profile) }
+        item {
+            Text("Peran: ${s.user?.role}")
+            SecondaryButton(if (s.unreadNotificationCount > 0) "Notifikasi (${s.unreadNotificationCount} belum dibaca)" else "Notifikasi", onNotifications)
+            SecondaryButton("Perbarui profil", vm::profile)
+        }
         s.profile?.let { p -> item { key(p.toString()) { ProfileForm(p, farmer, admin, vm) } } }
         if (farmer) { item { PaymentMethods(s, vm) }; item { KtpForm(vm) } }
         item { SecondaryButton("Keluar", vm::logout) }

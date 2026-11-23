@@ -27,9 +27,12 @@ data class ConnectedState(
     val adminUsers: List<JsonObject> = emptyList(), val adminUserDetail: JsonObject? = null,
     val settings: JsonObject? = null, val auditLogs: List<JsonObject> = emptyList(),
     val disputes: List<JsonObject> = emptyList(), val latePayments: List<JsonObject> = emptyList(),
+    val notifications: List<JsonObject> = emptyList(), val unreadNotificationCount: Long = 0,
     val options: List<JsonObject> = emptyList(), val destination: JsonObject? = null,
     val proofs: List<JsonObject> = emptyList(), val fulfillment: JsonObject? = null,
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
+    val deliveryAreas: List<String> = emptyList(), val shippingEnabled: Boolean = false,
+    val review: JsonObject? = null, val reviewLoaded: Boolean = false,
     val image: ByteArray? = null, val profile: JsonObject? = null,
     val page: Int = 0, val more: Boolean = false,
     val farmerOrderProofs: Map<String, List<JsonObject>> = emptyMap(),
@@ -38,7 +41,8 @@ data class ConnectedState(
     val farmerQrisId: String? = null, val farmerQrisImage: ByteArray? = null,
     val farmerOnboarding: FarmerOnboardingState = FarmerOnboardingState()
 )
-class ConnectedViewModel @JvmOverloads constructor(app: Application, private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
+class ConnectedViewModel @JvmOverloads constructor(app: Application,
+    private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
     private val enrollment = FarmerEnrollment(api)
     private var farmerDraft: RegistrationInput? = null
     private var farmerDummyId = newDummyId()
@@ -53,7 +57,7 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
         if (state.value.busy) return
         viewModelScope.launch {
             set { it.copy(busy = true, error = null, message = null) }
-            try { block(); set { it.copy(message = message) } }
+            try { block(); if (message != null) set { it.copy(message = message) } }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (api.session == null && state.value.user != null) mutable.value = ConnectedState(error = "Sesi berakhir. Silakan masuk kembali.")
@@ -181,9 +185,19 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
         set { it.copy(products = it.products.filterNot { p -> p.text("id") == productId } + updated) }
         done()
     }
-    fun cart() = run { val cart = api.get("buyer/cart").asJsonObject; set { it.copy(cart = cart) } }
+    fun cart() = run {
+        val cart = api.get("buyer/cart").asJsonObject
+        set { it.copy(cart = cart, fulfillment = null, quote = null, checkoutBody = null,
+            deliveryAreas = emptyList(), shippingEnabled = false) }
+        cart.list("items").firstOrNull()?.let { first ->
+            val product = api.get("buyer/products/${first.text("productId")}").asJsonObject
+            set { it.copy(deliveryAreas = product.getAsJsonArray("serviceArea")?.map { area -> area.asString }.orEmpty(),
+                shippingEnabled = product.flag("shippingEnabled")) }
+        }
+    }
     fun add(product: String, quantity: String) = run("Keranjang tersimpan di server.") {
         api.post("buyer/cart/items", json("productId" to product, "quantityKg" to kg(quantity)))
+        invalidateSchedules()
     }
     fun quantity(id: String, quantity: String) = run("Keranjang diperbarui.") {
         api.put("buyer/cart/items/$id", json("quantityKg" to kg(quantity)))
@@ -222,7 +236,15 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
     fun checkout(done: () -> Unit) = run {
         val body = state.value.checkoutBody ?: error("Periksa total terlebih dahulu.")
         require(state.value.quote?.flag("canCheckout") == true) { "Checkout belum diizinkan server." }
-        val order = keyedPost("buyer/checkout", body).asJsonObject
+        val order = try { keyedPost("buyer/checkout", body).asJsonObject }
+        catch (e: ApiFailure) {
+            if (e.status in listOf(400, 409)) {
+                invalidateSchedules()
+                throw ApiFailure(e.status, "${e.message} Muat ulang keranjang, pilih jadwal dan periksa total kembali sebelum menyetujui.")
+            }
+            // A lost response may already have created an order. Keep body and key for a safe retry.
+            throw e
+        }
         set { it.copy(detail = order, quote = null, checkoutBody = null, cart = JsonObject(), fulfillment = null, message = "Pesanan ${order.text("orderId")} dibuat.") }
         done()
     }
@@ -233,7 +255,24 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
     }
     private suspend fun detail(id: String) {
         val order = api.get("$role/orders/$id").asJsonObject
-        set { it.copy(detail = order, options = emptyList(), destination = null, proofs = emptyList(), image = null) }
+        set { it.copy(detail = order, options = emptyList(), destination = null, proofs = emptyList(), image = null,
+            review = null, reviewLoaded = false) }
+        if (role == "buyer" && order.text("orderStatus") == "selesai") {
+            val review = api.get("buyer/orders/$id/review")
+            set { it.copy(review = review.takeIf { value -> value.isJsonObject }?.asJsonObject, reviewLoaded = true) }
+        }
+    }
+    fun review(id: String, rating: Int, comment: String) = run("Ulasan terkirim.") {
+        try {
+            val review = api.post("buyer/orders/$id/review", json("rating" to rating, "comment" to comment)).asJsonObject
+            set { it.copy(review = review, reviewLoaded = true) }
+        } catch (e: ApiFailure) {
+            if (e.status == 409) {
+                val review = api.get("buyer/orders/$id/review")
+                if (review.isJsonObject) { set { it.copy(review = review.asJsonObject, reviewLoaded = true) }; return@run }
+            }
+            throw e
+        }
     }
     fun order(id: String) = run { set { it.copy(detail = null) }; detail(id) }
     private suspend fun mutateOrder(id: String, path: String, body: JsonObject, put: Boolean) {
@@ -326,6 +365,20 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
         val rows = api.get("buyer/refunds?size=20").rows(); set { it.copy(refunds = rows) }
     }
     fun invalidateSchedules() = set { it.copy(fulfillment = null, quote = null, checkoutBody = null) }
+    fun notifications() = run {
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
+    fun readNotification(id: String) = run {
+        api.put("notifications/$id/read", json())
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
+    fun readAllNotifications() = run("Semua notifikasi telah ditandai dibaca.") {
+        api.put("notifications/read-all", json())
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
     fun profile() = run {
         val result = api.get(if (role == "petani") "petani/profile" else "auth/profile").asJsonObject
         val methods = if (role == "petani") api.get("petani/payment-methods").rows() else state.value.paymentMethods
@@ -337,6 +390,11 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application, private val
     }
     fun commodities() = run {
         val result = api.get("buyer/commodities").rows(); set { it.copy(commodities = result) }
+        if (role == "petani") {
+            val profile = api.get("petani/profile").asJsonObject
+            val methods = api.get("petani/payment-methods").rows()
+            set { it.copy(profile = profile, paymentMethods = methods) }
+        }
     }
     fun adminCommodities() = run {
         val rows = api.get("admin/commodities").rows(); set { it.copy(commodities = rows) }

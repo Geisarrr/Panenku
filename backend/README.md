@@ -1030,6 +1030,9 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/auth/refresh` | Refresh access token | Publik |
 | GET | `/auth/me` | Lihat profil sendiri (tanpa sensitive data) | Semua role |
 | PUT | `/auth/profile` | Update profil sendiri | Semua role |
+| GET | `/notifications` | Daftar notifikasi milik sendiri | Semua role aktif/tersuspend |
+| PUT | `/notifications/{id}/read` | Tandai satu notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
+| PUT | `/notifications/read-all` | Tandai seluruh notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
 
 ### 2. Pembeli
 
@@ -1052,8 +1055,6 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/buyer/refunds` | Ajukan refund (maksimal 1 aktif per pesanan) | Pembeli |
 | GET | `/buyer/refunds` | Daftar refund sendiri | Pembeli |
 | POST | `/buyer/refunds/{id}/escalations` | Eskalasi refund ke admin | Pembeli |
-| GET | `/buyer/notifications` | Daftar notifikasi dalam aplikasi | Pembeli |
-| PUT | `/buyer/notifications/{id}/read` | Tandai notifikasi dibaca | Pembeli |
 
 ### 3. Petani
 
@@ -1402,7 +1403,7 @@ Bagian ini memisahkan **desain target** (isi README di atas) dari **kondisi kode
 | Admin (F7) | `GET /api/v1/admin/refunds`, `GET /api/v1/admin/refunds/{id}`, `GET /api/v1/admin/refunds/{id}/evidence`, `GET /api/v1/admin/refunds/{id}/transfer-proof`, `GET /api/v1/admin/disputes`, `GET /api/v1/admin/disputes/{id}`, `PUT /api/v1/admin/disputes/{id}/decide` |
 | Admin (laporan transfer terlambat) | `GET /api/v1/admin/late-payment-reports`, `GET /api/v1/admin/late-payment-reports/{id}`, `GET /api/v1/admin/late-payment-reports/{id}/evidence`, `PUT /api/v1/admin/late-payment-reports/{id}/review`, `PUT /api/v1/admin/late-payment-reports/{id}/close` |
 
-Sisanya (review, notifikasi, KTP asli dan integrasi UI) masih **direncanakan**.
+Sisanya (review, KTP asli, dan sebagian integrasi UI) masih **direncanakan**.
 
 #### Antrean KTP, pengguna, pengaturan dan audit admin
 
@@ -1463,10 +1464,19 @@ Petani mengirim `POST /api/v1/petani/ktp/application` dengan `Idempotency-Key` d
 ```bash
 export PANENKU_DEMO_DATABASE_URL='postgresql://localhost:5432/panenku_demo'
 export PANENKU_DEMO_CONFIRM=YES
+export PANENKU_DEMO_PASSWORD='PanenkuDemo2211!'
 python3 scripts/seed_demo.py
 ```
 
-Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Menjalankannya lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
+Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Dengan perintah contoh di atas, gunakan akun berikut untuk login di lingkungan demo lokal:
+
+| Peran | Email | Kata sandi demo |
+|---|---|---|
+| Pembeli — Mok | `mok@example.test` | `PanenkuDemo2211!` |
+| Petani — Asep Laris | `asep@example.test` | `PanenkuDemo2211!` |
+| Admin Demo | `admin@example.test` | `PanenkuDemo2211!` |
+
+Jika nilai `PANENKU_DEMO_PASSWORD` diubah, ketiga akun memakai nilai baru tersebut. Akun pada tabel ini hanya dibuat oleh `seed_demo.py` di database kosong `panenku_demo`; bukan akun bawaan aplikasi atau akun produksi. Untuk database lokal biasa, `scripts/create-local-admin-mac.sh` hanya membuat `admin@example.test` dan kata sandinya adalah nilai yang diketik saat menjalankan script. Menjalankan seed lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
 
 Checkout tidak memilih metode pembayaran. Backend menyimpan salinan semua metode yang tersedia saat checkout; setelah petani menerima pesanan, pembeli melihat salinan tersebut melalui `GET /orders/{orderId}/payment-options` dan memilih dengan `PUT /orders/{orderId}/payment-destination`, body `{"paymentMethodId":"<id>"}`. Pembeli dapat mengubah pilihan sebelum bukti pertama dikirim. Saat bukti dikirim, tujuan terpilih menjadi snapshot immutable dan tidak dapat diganti, termasuk setelah bukti ditolak. Rekening lengkap dan gambar QRIS hanya tersedia untuk pemilik setelah petani menerima pesanan. QRIS menggunakan penyimpanan lokal privat yang dikonfigurasi melalui `PAYMENT_STORAGE_LOCAL_DIR` (macOS/Linux), bukan MinIO/S3 produksi. Pesanan lama tanpa snapshot tetap tidak memiliki tujuan pembayaran otomatis. Retry checkout lama dengan key dan body lama tetap didukung; field pilihan pembayaran pada checkout baru ditolak agar klien diperbarui.
 
@@ -1534,9 +1544,9 @@ Admin meninjau melalui `PUT /api/v1/admin/late-payment-reports/{id}/review` deng
 
 ### Tabel yang sudah ada migrasinya
 
-`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`.
+`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`, `notifications`.
 
-Belum ada migrasi: `notifications` (target Tahap 3–4). Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
+Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
 
 ### Deviasi desain vs implementasi
 

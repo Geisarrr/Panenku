@@ -50,7 +50,8 @@ class OrderLifecycleService(
     private val orderItems: OrderItemRepository,
     private val reservations: StockReservationRepository,
     private val history: OrderStatusHistoryRepository,
-    private val clock: Clock, private val scheduleGuard: OrderScheduleGuard
+    private val clock: Clock, private val scheduleGuard: OrderScheduleGuard,
+    private val notifications: NotificationService
 ) {
 
     @Transactional(readOnly = true)
@@ -84,6 +85,7 @@ class OrderLifecycleService(
         record(order, previous, order.orderStatus, actor, "pembeli",
             noteOrDefault("Pembeli membatalkan pesanan.", request.reason), now)
         orders.flush()
+        notifications.create(order.farmerId, "Pesanan dibatalkan", "Pembeli membatalkan pesanan #${order.id.toString().take(8)}.", "order", "/orders/${order.id}", now)
         return view(order, withHistory = true)
     }
 
@@ -102,6 +104,7 @@ class OrderLifecycleService(
         record(order, previous, order.orderStatus, actor, "pembeli",
             "Pembeli mengonfirmasi pesanan diterima.", now)
         orders.flush()
+        notifications.create(order.farmerId, "Pesanan selesai", "Pembeli mengonfirmasi pesanan #${order.id.toString().take(8)} sudah diterima.", "order", "/orders/${order.id}", now)
         return view(order, withHistory = true)
     }
 
@@ -151,6 +154,10 @@ class OrderLifecycleService(
         }
 
         orders.flush()
+        val responseTitle = if (target == OrderStatusRules.DITOLAK) "Pesanan ditolak" else "Pesanan diterima petani"
+        notifications.create(order.buyerId, responseTitle,
+            "Pesanan #${order.id.toString().take(8)} ${if (target == OrderStatusRules.DITOLAK) "ditolak petani." else "siap dilanjutkan ke pembayaran."}",
+            "order", "/orders/${order.id}", now)
         return view(order, withHistory = true)
     }
 
@@ -184,6 +191,15 @@ class OrderLifecycleService(
         record(order, previous, transition.targetStatus, actor, "petani",
             noteOrDefault(defaultFulfillmentNote(transition.targetStatus), request.note), now)
         orders.flush()
+        val title = when (transition.targetStatus) {
+            OrderStatusRules.SIAP_DIAMBIL -> "Pesanan siap diambil"
+            OrderStatusRules.DIANTAR -> "Pesanan sedang diantar"
+            OrderStatusRules.MENUNGGU_PENERIMAAN -> "Konfirmasi penerimaan pesanan"
+            OrderStatusRules.GAGAL_DIPENUHI -> "Pesanan gagal dipenuhi"
+            else -> "Status pesanan diperbarui"
+        }
+        notifications.create(order.buyerId, title, "Status pesanan #${order.id.toString().take(8)} diperbarui menjadi ${transition.targetStatus}.",
+            "order", "/orders/${order.id}", now)
         return view(order, withHistory = true)
     }
 

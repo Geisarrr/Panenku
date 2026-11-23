@@ -83,6 +83,7 @@ class CheckoutIntegrationTest {
     @Autowired lateinit var paymentDestinations: com.panenku.backend.modules.shared.service.PaymentDestinationService
     @Autowired lateinit var farmerPaymentMethods: com.panenku.backend.modules.petani.service.FarmerPaymentMethodService
     @Autowired lateinit var paymentSubmissions: com.panenku.backend.modules.shared.service.PaymentSubmissionService
+    @Autowired lateinit var notifications: com.panenku.backend.modules.shared.service.NotificationService
     @Autowired lateinit var refunds: com.panenku.backend.modules.shared.service.RefundService
     @Autowired lateinit var latePayments: com.panenku.backend.modules.shared.service.LatePaymentReportService
     @Autowired lateinit var dummyKtp: com.panenku.backend.modules.petani.service.DummyKtpService
@@ -129,6 +130,92 @@ class CheckoutIntegrationTest {
     fun deliveryRequest(quantity: String = "0.75"): CheckoutRequest = request(quantity).copy(
         fulfillmentMethod = "delivery", expectedDeliveryFee = 10000,
         deliveryAddress = "Alamat dummy", deliveryDistrict = "kepanjen")
+
+    private fun reviewOrder(finished: Boolean = true): UUID {
+        val id = checkout.checkout(buyer, "review-${UUID.randomUUID()}", request()).orderId
+        if (finished) db.update("UPDATE orders SET order_status='selesai', received_at=? WHERE id=?",
+            java.sql.Timestamp.from(clock.instant()), id)
+        return id
+    }
+    private fun submitReview(id: UUID, body: String = "{\"rating\":5,\"comment\":\"Segar\"}", actor: UUID = buyer) =
+        mvc.perform(post("/api/v1/buyer/orders/$id/review").with(jwt().jwt { it.subject(actor.toString()) })
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+
+    @Test fun `review persists once and updates real farmer rating`() {
+        val id = reviewOrder()
+        mvc.perform(get("/api/v1/buyer/orders/$id/review").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk)
+        submitReview(id).andExpect(status().isCreated).andExpect(jsonPath("$.data.rating").value(5))
+            .andExpect(jsonPath("$.data.orderId").value(id.toString()))
+            .andExpect(jsonPath("$.data.farmerId").value(farmer.toString()))
+        mvc.perform(get("/api/v1/buyer/orders/$id/review").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.comment").value("Segar"))
+        mvc.perform(get("/api/v1/buyer/products/$product").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.farmerRating.reviewCount").value(1))
+        submitReview(id).andExpect(status().isConflict)
+        assertEquals(1, db.queryForObject("SELECT count(*) FROM reviews WHERE order_id=?", Int::class.java, id))
+    }
+    @Test fun `review rejects another buyer and unauthorized role or suspension`() {
+        val id = reviewOrder()
+        submitReview(id, actor = otherBuyer).andExpect(status().isForbidden)
+        submitReview(id, actor = farmer).andExpect(status().isForbidden)
+        mvc.perform(get("/api/v1/buyer/orders/$id/review").with(jwt().jwt { it.subject(otherBuyer.toString()) }))
+            .andExpect(status().isForbidden)
+        db.update("UPDATE users SET status='suspended' WHERE id=?", buyer)
+        submitReview(id).andExpect(status().isForbidden)
+    }
+    @Test fun `review rejects every unfinished status`() {
+        val id = reviewOrder(false)
+        listOf("menunggu_petani", "menunggu_pembayaran", "diproses", "diantar", "siap_diambil", "menunggu_penerimaan", "ditolak", "dibatalkan", "kedaluwarsa", "gagal_dipenuhi").forEach { state ->
+            db.update("UPDATE orders SET order_status=? WHERE id=?", state, id)
+            submitReview(id).andExpect(status().isConflict)
+        }
+        assertEquals(0, db.queryForObject("SELECT count(*) FROM reviews", Int::class.java))
+    }
+    @Test fun `review validates stars and comment boundaries`() {
+        val id = reviewOrder()
+        listOf("{}", "{\"rating\":null}", "{\"rating\":0}", "{\"rating\":6}", "{\"rating\":1.5}",
+            mapper.writeValueAsString(mapOf("rating" to 5, "comment" to "a".repeat(501)))).forEach {
+            submitReview(id, it).andExpect(status().isBadRequest)
+        }
+        submitReview(id, mapper.writeValueAsString(mapOf("rating" to 1, "comment" to "a".repeat(500))))
+            .andExpect(status().isCreated).andExpect(jsonPath("$.data.rating").value(1))
+    }
+    @Test fun `review permits optional comment and rejects missing order`() {
+        submitReview(UUID.randomUUID()).andExpect(status().isNotFound)
+        submitReview(reviewOrder(), "{\"rating\":4}").andExpect(status().isCreated)
+    }
+    @Test fun `concurrent review submissions create exactly one review`() {
+        val id = reviewOrder()
+        val pool = Executors.newFixedThreadPool(2)
+        val start = CountDownLatch(1)
+        try {
+            val tasks = (1..2).map { pool.submit<Int> { start.await(); submitReview(id).andReturn().response.status } }
+            start.countDown()
+            assertEquals(listOf(201, 409), tasks.map { it.get(20, TimeUnit.SECONDS) }.sorted())
+            assertEquals(1, db.queryForObject("SELECT count(*) FROM reviews WHERE order_id=?", Int::class.java, id))
+        } finally { pool.shutdownNow() }
+    }
+
+    @Test fun `checkout creates private notification and recipient can mark it read`() {
+        val order = checkout.checkout(buyer, "notification-${UUID.randomUUID()}", request())
+        val notificationId = db.queryForObject("SELECT id FROM notifications WHERE user_id=? AND type='order'", UUID::class.java, farmer)!!
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(1))
+            .andExpect(jsonPath("$.data.unreadCount").value(1))
+            .andExpect(jsonPath("$.data.items[0].deepLink").value("/orders/${order.orderId}"))
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(0))
+        mvc.perform(put("/api/v1/notifications/$notificationId/read").with(jwt().jwt { it.subject(buyer.toString()) }))
+            .andExpect(status().isNotFound)
+        mvc.perform(put("/api/v1/notifications/$notificationId/read").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.isRead").value(true))
+        mvc.perform(get("/api/v1/notifications").param("unreadOnly", "true").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(0))
+        db.update("UPDATE users SET status='suspended' WHERE id=?", farmer)
+        mvc.perform(get("/api/v1/notifications").with(jwt().jwt { it.subject(farmer.toString()) }))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.totalElements").value(1))
+    }
     /**
      * Membuat pesanan lalu memaksa status lewat SQL. Status pemenuhan F5 membutuhkan
      * pembayaran terverifikasi, sedangkan endpoint F6 belum tersedia.
@@ -1305,7 +1392,7 @@ class CheckoutIntegrationTest {
         val order = awaitingPayment()
         val offline = com.panenku.backend.modules.shared.service.PaymentSubmissionService(
             actors, orderRepository, orderHistoryRepository, db, userRepository, farmerProfileRepository,
-            productRepository, stockReservationRepository, paymentDestinations, mapper, clock, scheduleGuard, "")
+            productRepository, stockReservationRepository, paymentDestinations, mapper, clock, scheduleGuard, notifications, "")
         val error = assertThrows(ApiException::class.java) {
             org.springframework.transaction.support.TransactionTemplate(transactionManager).execute {
                 offline.submit(buyer, order, "proof-no-storage", qrisUpload())
