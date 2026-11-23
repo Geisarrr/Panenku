@@ -1030,6 +1030,9 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/auth/refresh` | Refresh access token | Publik |
 | GET | `/auth/me` | Lihat profil sendiri (tanpa sensitive data) | Semua role |
 | PUT | `/auth/profile` | Update profil sendiri | Semua role |
+| GET | `/notifications` | Daftar notifikasi milik sendiri | Semua role aktif/tersuspend |
+| PUT | `/notifications/{id}/read` | Tandai satu notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
+| PUT | `/notifications/read-all` | Tandai seluruh notifikasi milik sendiri sudah dibaca | Semua role aktif/tersuspend |
 
 ### 2. Pembeli
 
@@ -1052,8 +1055,6 @@ Semua endpoint menggunakan prefix `/api/v1`. Autentikasi menggunakan header `Aut
 | POST | `/buyer/refunds` | Ajukan refund (maksimal 1 aktif per pesanan) | Pembeli |
 | GET | `/buyer/refunds` | Daftar refund sendiri | Pembeli |
 | POST | `/buyer/refunds/{id}/escalations` | Eskalasi refund ke admin | Pembeli |
-| GET | `/buyer/notifications` | Daftar notifikasi dalam aplikasi | Pembeli |
-| PUT | `/buyer/notifications/{id}/read` | Tandai notifikasi dibaca | Pembeli |
 
 ### 3. Petani
 
@@ -1330,7 +1331,13 @@ SERVER_PORT=8080
 
 ### Foto dummy untuk pengembangan
 
-Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh yang dapat digunakan tim saat menguji aplikasi. Skenarionya: **Asep Laris** adalah petani, **Mok** adalah pembeli, dan sawi yang diterima pembeli rusak, sobek, serta tidak segar.
+Untuk mencoba foto produk **tanpa MinIO**, tersedia adapter lokal pengembangan. Set `PRODUCT_PHOTOS_ENABLED=true`, `PRODUCT_PHOTOS_LOCAL_DIR` ke folder privat absolut yang terpisah dari bukti pembayaran, dan `PRODUCT_PHOTOS_LOCAL_BASE_URL=http://127.0.0.1:8080` untuk HP USB dengan `adb reverse tcp:8080 tcp:8080`. Emulator memakai base URL `http://10.0.2.2:8080`. Script `bash scripts/start-local-mac.sh` menyiapkan konfigurasi lokal Mac. Folder fisik tidak disajikan sebagai direktori publik; backend mengembalikan `photoAccessUrl` bertanda tangan yang berlaku 15 menit. Permintaan tanpa tanda tangan valid atau setelah kedaluwarsa ditolak. Gunakan `demo-assets/foto-dummy/produk-sawi-segar.png` lewat endpoint unggah foto F1, lalu publikasikan produk. Tidak ada perubahan skema database atau kontrak upload FE.
+
+Adapter lokal menyimpan kunci berawalan `local-products/`, terpisah dari kunci MinIO `products/`. Berpindah provider tidak memindahkan file lama secara otomatis; unggah ulang foto sebelum publikasi bila provider berubah. Foto lama setelah penggantian tetap tersimpan untuk mempertahankan tautan yang sudah diterbitkan sampai kedaluwarsa; pembersihan file belum otomatis. Storage QRIS/bukti/refund tetap memakai `PAYMENT_STORAGE_LOCAL_DIR`. Tes lokal tanpa MinIO: `./gradlew test --tests com.panenku.backend.LocalProductPhotoIntegrationTest`.
+
+Untuk UAT lokal yang perlu menguji jadwal atau kedaluwarsa tanpa mengubah jam macOS, backend dapat dijalankan dengan `PANENKU_DEV_CLOCK_OFFSET` berupa durasi ISO-8601, misalnya `PT10H`. Nilai bawaan `PT0S` memakai waktu nyata. Opsi ini hanya untuk pengembangan lokal; jangan dipakai pada deployment bersama atau produksi.
+
+Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh yang dapat digunakan tim saat menguji aplikasi. Semua aset pada tabel berikut ikut tersimpan di Git; setelah pull branch `integrasi-api`, pilih file tersebut secara manual dari folder ini saat UI meminta gambar. Skenarionya: **Asep Laris** adalah petani, **Mok** adalah pembeli, dan sawi yang diterima pembeli rusak, sobek, serta tidak segar.
 
 | File | Penggunaan |
 |------|------------|
@@ -1340,6 +1347,7 @@ Folder [`demo-assets/foto-dummy/`](demo-assets/foto-dummy/) berisi gambar contoh
 | [bukti-transfer-refund.png](demo-assets/foto-dummy/bukti-transfer-refund.png) | Contoh bukti transfer pengembalian dana dari petani kepada pembeli. |
 | [bukti-transfer-terlambat.png](demo-assets/foto-dummy/bukti-transfer-terlambat.png) | Contoh bukti untuk laporan transfer setelah pesanan kedaluwarsa. |
 | [produk-sawi-segar.png](demo-assets/foto-dummy/produk-sawi-segar.png) | Contoh gambar produk sawi untuk katalog. |
+| [ktp-dummy-asep-laris.png](demo-assets/foto-dummy/ktp-dummy-asep-laris.png) | Ilustrasi dokumen contoh Asep Laris berwatermark DUMMY; bukan identitas resmi atau NIK nyata. |
 
 Semua gambar berformat PNG dan berukuran kurang dari 5 MB. Nilai Rp25.000 pada ilustrasi bukti adalah contoh. Pilih gambar secara manual saat mencoba endpoint upload atau UI yang sudah terhubung; unggah foto produk tersedia melalui penyimpanan F1 tersendiri; lihat `docs/F1_IMPLEMENTATION.md`.
 
@@ -1395,7 +1403,7 @@ Bagian ini memisahkan **desain target** (isi README di atas) dari **kondisi kode
 | Admin (F7) | `GET /api/v1/admin/refunds`, `GET /api/v1/admin/refunds/{id}`, `GET /api/v1/admin/refunds/{id}/evidence`, `GET /api/v1/admin/refunds/{id}/transfer-proof`, `GET /api/v1/admin/disputes`, `GET /api/v1/admin/disputes/{id}`, `PUT /api/v1/admin/disputes/{id}/decide` |
 | Admin (laporan transfer terlambat) | `GET /api/v1/admin/late-payment-reports`, `GET /api/v1/admin/late-payment-reports/{id}`, `GET /api/v1/admin/late-payment-reports/{id}/evidence`, `PUT /api/v1/admin/late-payment-reports/{id}/review`, `PUT /api/v1/admin/late-payment-reports/{id}/close` |
 
-Sisanya (review, notifikasi, KTP asli dan integrasi UI) masih **direncanakan**.
+Sisanya (review, KTP asli, dan sebagian integrasi UI) masih **direncanakan**.
 
 #### Antrean KTP, pengguna, pengaturan dan audit admin
 
@@ -1456,10 +1464,19 @@ Petani mengirim `POST /api/v1/petani/ktp/application` dengan `Idempotency-Key` d
 ```bash
 export PANENKU_DEMO_DATABASE_URL='postgresql://localhost:5432/panenku_demo'
 export PANENKU_DEMO_CONFIRM=YES
+export PANENKU_DEMO_PASSWORD='PanenkuDemo2211!'
 python3 scripts/seed_demo.py
 ```
 
-Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Menjalankannya lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
+Script membuat Mok (`mok@example.test`), Asep Laris (`asep@example.test`), admin (`admin@example.test`), produk sawi, QRIS dummy, dua pesanan, bukti pembayaran, dan refund; ketiganya memakai `PANENKU_DEMO_PASSWORD`. Dengan perintah contoh di atas, gunakan akun berikut untuk login di lingkungan demo lokal:
+
+| Peran | Email | Kata sandi demo |
+|---|---|---|
+| Pembeli — Mok | `mok@example.test` | `PanenkuDemo2211!` |
+| Petani — Asep Laris | `asep@example.test` | `PanenkuDemo2211!` |
+| Admin Demo | `admin@example.test` | `PanenkuDemo2211!` |
+
+Jika nilai `PANENKU_DEMO_PASSWORD` diubah, ketiga akun memakai nilai baru tersebut. Akun pada tabel ini hanya dibuat oleh `seed_demo.py` di database kosong `panenku_demo`; bukan akun bawaan aplikasi atau akun produksi. Untuk database lokal biasa, `scripts/create-local-admin-mac.sh` hanya membuat `admin@example.test` dan kata sandinya adalah nilai yang diketik saat menjalankan script. Menjalankan seed lagi tidak menimpa data. Setup pertama menolak database berisi pengguna/produk/pesanan/komoditas atau folder demo yang tidak kosong. Gambar produk tersimpan sebagai path contoh; path contoh tersebut belum menjadi object key foto F1; unggah gambar produk lewat endpoint F1 sebelum menampilkannya di UI. Data dummy bukan transaksi atau nomor pembayaran sungguhan.
 
 Checkout tidak memilih metode pembayaran. Backend menyimpan salinan semua metode yang tersedia saat checkout; setelah petani menerima pesanan, pembeli melihat salinan tersebut melalui `GET /orders/{orderId}/payment-options` dan memilih dengan `PUT /orders/{orderId}/payment-destination`, body `{"paymentMethodId":"<id>"}`. Pembeli dapat mengubah pilihan sebelum bukti pertama dikirim. Saat bukti dikirim, tujuan terpilih menjadi snapshot immutable dan tidak dapat diganti, termasuk setelah bukti ditolak. Rekening lengkap dan gambar QRIS hanya tersedia untuk pemilik setelah petani menerima pesanan. QRIS menggunakan penyimpanan lokal privat yang dikonfigurasi melalui `PAYMENT_STORAGE_LOCAL_DIR` (macOS/Linux), bukan MinIO/S3 produksi. Pesanan lama tanpa snapshot tetap tidak memiliki tujuan pembayaran otomatis. Retry checkout lama dengan key dan body lama tetap didukung; field pilihan pembayaran pada checkout baru ditolak agar klien diperbarui.
 
@@ -1527,9 +1544,9 @@ Admin meninjau melalui `PUT /api/v1/admin/late-payment-reports/{id}/review` deng
 
 ### Tabel yang sudah ada migrasinya
 
-`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`.
+`users`, `farmer_profiles`, `buyer_profiles`, `commodities`, `products`, `farmer_payment_methods`, `settings`, `cart`, `orders`, `order_items`, `stock_reservations`, `order_status_history`, `audit_logs`, `order_payment_snapshots`, `order_payment_options`, `order_payment_selections`, `qris_upload_requests`, `bank_method_requests`, `payment_submissions`, `refunds`, `refund_history`, `refund_transfer_requests`, `refund_disputes`, `late_payment_reports`, `admin_settings_revision`, `auth_refresh_sessions`, `ktp_dummy_applications`, `notifications`.
 
-Belum ada migrasi: `notifications` (target Tahap 3–4). Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
+Migrasi F1 V5 menyediakan tabel `reviews`; endpoint mengirim ulasan belum tersedia.
 
 ### Deviasi desain vs implementasi
 

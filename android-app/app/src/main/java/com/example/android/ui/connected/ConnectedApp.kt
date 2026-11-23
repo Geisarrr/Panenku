@@ -19,24 +19,34 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.gson.JsonObject
+import id.panenku.app.ui.connected.farmer.FarmerConnectedApp
 import id.panenku.app.R
 import id.panenku.app.data.remote.*
 import id.panenku.app.ui.components.*
+import id.panenku.app.ui.auth.PanenkuOpeningFlow
 
 /** Live entry point. Uses the sliced design system, never Demo*Repository. */
 @Composable
 fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     if (state.user == null) {
-        ConnectedLogin(state, vm)
+        PanenkuOpeningFlow(state.busy, vm::login, vm::registerAccount,
+            farmer = state.farmerOnboarding, onPrepareFarmer = vm::prepareFarmerAccount,
+            onVerifyFarmer = vm::submitFarmerRegistration, onVerificationExit = vm::finishFarmerVerification)
+    } else if (state.user!!.role == "petani") {
+        key(state.user!!.id) { FarmerConnectedApp(state, vm) }
     } else key(state.user!!.id) {
         var screen by rememberSaveable { mutableStateOf(if (state.user!!.role == "admin") "admin" else "catalog") }
         var orderId by rememberSaveable { mutableStateOf("") }
         var product by remember { mutableStateOf<JsonObject?>(null) }
         val buyer = state.user!!.role == "pembeli"
         val admin = state.user!!.role == "admin"
-        val tabs = if (admin) listOf("admin" to "Verifikasi", "refunds" to "Refund", "account" to "Akun")
-            else listOf("catalog" to if (buyer) "Toko" else "Stok", "orders" to "Pesanan", "refunds" to "Refund", "account" to "Akun")
+        val tabs = if (admin) listOf("admin" to "Verifikasi", "management" to "Kelola", "refunds" to "Refund", "account" to "Akun")
+            else buildList {
+                add("catalog" to if (buyer) "Toko" else "Stok"); add("orders" to "Pesanan"); add("refunds" to "Refund")
+                if (buyer) add("late-payments" to "Bantuan")
+                add("account" to "Akun")
+            }
         fun openOrder(id: String) { orderId = id; screen = "detail" }
         LaunchedEffect(screen) {
             when (screen) {
@@ -46,17 +56,37 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                 "refunds" -> vm.refunds()
                 "detail" -> vm.order(orderId)
                 "account" -> vm.profile()
+                "notifications" -> vm.notifications()
                 "admin" -> vm.adminQueue()
+                "commodities" -> vm.adminCommodities()
+                "admin-users" -> vm.adminUsers()
+                "admin-settings" -> vm.adminSettings()
+                "admin-audit" -> vm.auditLogs()
+                "admin-disputes" -> vm.disputes()
+                "admin-late-payments" -> vm.latePayments(true)
+                "late-payments" -> vm.latePayments(false)
                 "product" -> vm.commodities()
                 "checkout" -> vm.invalidateSchedules()
             }
         }
-        BackHandler(screen !in tabs.map { it.first } && !state.busy) { screen = if (screen == "refund-form") "detail" else "catalog" }
+        BackHandler(screen !in tabs.map { it.first } && !state.busy) {
+            screen = when {
+                screen == "refund-form" -> "detail"
+                screen == "notifications" -> "account"
+                admin -> "management"
+                else -> "catalog"
+            }
+        }
         Scaffold(bottomBar = {
             NavigationBar {
                 tabs.forEach { (route, label) ->
                     NavigationBarItem(selected = screen == route, onClick = { if (!state.busy) screen = route },
-                        icon = { Icon(when (route) { "catalog" -> Icons.Outlined.Storefront; "orders" -> Icons.Outlined.ReceiptLong; "refunds" -> Icons.Outlined.AssignmentReturn; else -> Icons.Outlined.Person }, label) },
+                        icon = { Icon(when (route) {
+                            "catalog" -> Icons.Outlined.Storefront; "orders" -> Icons.Outlined.ReceiptLong
+                            "refunds" -> Icons.Outlined.AssignmentReturn; "management" -> Icons.Outlined.AdminPanelSettings
+                            "late-payments" -> Icons.Outlined.ReportProblem; "admin" -> Icons.Outlined.VerifiedUser
+                            else -> Icons.Outlined.Person
+                        }, label) },
                         label = { Text(label) })
                 }
             }
@@ -70,9 +100,18 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                     "detail" -> ConnectedOrder(state, vm, buyer, { screen = "orders" }, { screen = "refund-form" })
                     "refund-form" -> ConnectedRefundForm(orderId, vm, { screen = "detail" }) { screen = "refunds" }
                     "refunds" -> ConnectedRefunds(state, vm, buyer, admin)
-                    "product" -> ConnectedProduct(product, state, vm) { screen = "catalog" }
-                    "account" -> ConnectedAccount(state, vm)
+                    "product" -> ConnectedProduct(product?.let { selected -> state.products.find { it.text("id") == selected.text("id") } ?: selected }, state, vm) { screen = "catalog" }
+                    "account" -> ConnectedAccount(state, vm) { screen = "notifications" }
+                    "notifications" -> ConnectedNotifications(state, vm) { screen = "account" }
                     "admin" -> ConnectedAdmin(state, vm)
+                    "management" -> ConnectedAdminHub { screen = it }
+                    "commodities" -> ConnectedCommodities(state, vm)
+                    "admin-users" -> ConnectedAdminUsers(state, vm) { screen = "management" }
+                    "admin-settings" -> ConnectedAdminSettings(state, vm) { screen = "management" }
+                    "admin-audit" -> ConnectedAdminAudit(state, vm) { screen = "management" }
+                    "admin-disputes" -> ConnectedAdminDisputes(state, vm) { screen = "management" }
+                    "admin-late-payments" -> ConnectedLatePayments(state, vm, true) { screen = "management" }
+                    "late-payments" -> ConnectedLatePayments(state, vm, false)
                 }
                 if (state.busy) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), modifier = Modifier.fillMaxSize().clickable { }) {
                     Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -88,28 +127,5 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
         AlertDialog(onDismissRequest = vm::dismiss, title = { Text("Bukti dari server") },
             text = { if (bitmap != null) Image(bitmap.asImageBitmap(), "Gambar bukti", Modifier.fillMaxWidth().heightIn(max = 450.dp)) else Text("Gambar tidak dapat ditampilkan.") },
             confirmButton = { TextButton(onClick = vm::dismiss) { Text("Tutup") } })
-    }
-}
-
-@Composable private fun ConnectedLogin(state: ConnectedState, vm: ConnectedViewModel) {
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var name by rememberSaveable { mutableStateOf("") }
-    var register by rememberSaveable { mutableStateOf(false) }
-    var farmer by rememberSaveable { mutableStateOf(false) }
-    Page(if (register) "Bergabung dengan Panenku" else "Selamat Datang Kembali!", "Panen segar, langsung dari petani.") {
-        item { Image(painterResource(R.drawable.logo_panenku), "Panenku", Modifier.width(140.dp).height(90.dp)) }
-        item { Panel {
-            if (register) {
-                Field("Nama lengkap / toko", name, { name = it })
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(farmer, { farmer = it }); Text("Daftar sebagai petani") }
-            }
-            Field("Email", email, { email = it }, keyboard = KeyboardType.Email)
-            Field("Kata sandi", password, { password = it }, password = true)
-            PrimaryButton(if (state.busy) "Memproses…" else if (register) "Buat akun" else "Masuk", {
-                if (register) vm.register(email, password, name, farmer) else vm.login(email, password)
-            }, !state.busy && email.isNotBlank() && password.isNotBlank() && (!register || name.isNotBlank()))
-            TextButton(onClick = { register = !register }, enabled = !state.busy) { Text(if (register) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
-        } }
     }
 }

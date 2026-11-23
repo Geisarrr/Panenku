@@ -16,7 +16,7 @@ import javax.imageio.ImageIO
 import javax.imageio.stream.MemoryCacheImageInputStream
 
 /** Penyimpanan lokal untuk pengembangan; tidak menyediakan URL atau otorisasi HTTP. */
-class LocalPrivateImageStore(directory: Path) {
+class LocalPrivateImageStore(directory: Path, private val maxPixels: Long = 12_000_000L) {
     private val root = directory.toAbsolutePath().normalize()
 
     init {
@@ -97,7 +97,7 @@ class LocalPrivateImageStore(directory: Path) {
                 }
                 val width = reader.getWidth(0)
                 val height = reader.getHeight(0)
-                if (width <= 0 || height <= 0 || width.toLong() * height > MAX_PIXELS) {
+                if (width <= 0 || height <= 0 || width.toLong() * height > maxPixels) {
                     invalid("Dimensi gambar tidak valid atau terlalu besar.")
                 }
                 reader.read(0) ?: invalid("Gambar tidak dapat dibaca.")
@@ -114,7 +114,6 @@ class LocalPrivateImageStore(directory: Path) {
 
     private companion object {
         const val MAX_BYTES = 5 * 1024 * 1024
-        const val MAX_PIXELS = 12_000_000L
         val KEY_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png)")
         val OWNER_DIRECTORY = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE)
         val OWNER_FILE = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
