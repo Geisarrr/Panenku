@@ -53,6 +53,7 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                 "refunds" -> vm.refunds()
                 "detail" -> vm.order(orderId)
                 "account" -> vm.profile()
+                "notifications" -> vm.notifications()
                 "admin" -> vm.adminQueue()
                 "commodities" -> vm.adminCommodities()
                 "admin-users" -> vm.adminUsers()
@@ -68,6 +69,7 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
         BackHandler(screen !in tabs.map { it.first } && !state.busy) {
             screen = when {
                 screen == "refund-form" -> "detail"
+                screen == "notifications" -> "account"
                 admin -> "management"
                 else -> "catalog"
             }
@@ -96,7 +98,8 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
                     "refund-form" -> ConnectedRefundForm(orderId, vm, { screen = "detail" }) { screen = "refunds" }
                     "refunds" -> ConnectedRefunds(state, vm, buyer, admin)
                     "product" -> ConnectedProduct(product?.let { selected -> state.products.find { it.text("id") == selected.text("id") } ?: selected }, state, vm) { screen = "catalog" }
-                    "account" -> ConnectedAccount(state, vm)
+                    "account" -> ConnectedAccount(state, vm) { screen = "notifications" }
+                    "notifications" -> ConnectedNotifications(state, vm) { screen = "account" }
                     "admin" -> ConnectedAdmin(state, vm)
                     "management" -> ConnectedAdminHub { screen = it }
                     "commodities" -> ConnectedCommodities(state, vm)

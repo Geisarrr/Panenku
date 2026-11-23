@@ -45,11 +45,15 @@ import id.panenku.app.ui.components.*
         } }
     }
 }
-@Composable internal fun ConnectedAccount(s: ConnectedState, vm: ConnectedViewModel) {
+@Composable internal fun ConnectedAccount(s: ConnectedState, vm: ConnectedViewModel, onNotifications: () -> Unit = {}) {
     val farmer = s.user?.role == "petani"
     val admin = s.user?.role == "admin"
     Page("Akun", s.user?.email.orEmpty()) {
-        item { Text("Peran: ${s.user?.role}"); SecondaryButton("Perbarui profil", vm::profile) }
+        item {
+            Text("Peran: ${s.user?.role}")
+            SecondaryButton(if (s.unreadNotificationCount > 0) "Notifikasi (${s.unreadNotificationCount} belum dibaca)" else "Notifikasi", onNotifications)
+            SecondaryButton("Perbarui profil", vm::profile)
+        }
         s.profile?.let { p -> item { key(p.toString()) { ProfileForm(p, farmer, admin, vm) } } }
         if (farmer) { item { PaymentMethods(s, vm) }; item { KtpForm(vm) } }
         item { SecondaryButton("Keluar", vm::logout) }

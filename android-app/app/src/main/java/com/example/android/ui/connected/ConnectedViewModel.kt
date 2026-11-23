@@ -27,6 +27,7 @@ data class ConnectedState(
     val adminUsers: List<JsonObject> = emptyList(), val adminUserDetail: JsonObject? = null,
     val settings: JsonObject? = null, val auditLogs: List<JsonObject> = emptyList(),
     val disputes: List<JsonObject> = emptyList(), val latePayments: List<JsonObject> = emptyList(),
+    val notifications: List<JsonObject> = emptyList(), val unreadNotificationCount: Long = 0,
     val options: List<JsonObject> = emptyList(), val destination: JsonObject? = null,
     val proofs: List<JsonObject> = emptyList(), val fulfillment: JsonObject? = null,
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
@@ -273,6 +274,20 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         val rows = api.get("buyer/refunds?size=20").rows(); set { it.copy(refunds = rows) }
     }
     fun invalidateSchedules() = set { it.copy(fulfillment = null, quote = null, checkoutBody = null) }
+    fun notifications() = run {
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
+    fun readNotification(id: String) = run {
+        api.put("notifications/$id/read", json())
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
+    fun readAllNotifications() = run("Semua notifikasi telah ditandai dibaca.") {
+        api.put("notifications/read-all", json())
+        val result = api.get("notifications?size=50").asJsonObject
+        set { it.copy(notifications = result.list("items"), unreadNotificationCount = result.long("unreadCount")) }
+    }
     fun profile() = run {
         val result = api.get(if (role == "petani") "petani/profile" else "auth/profile").asJsonObject
         val methods = if (role == "petani") api.get("petani/payment-methods").rows() else state.value.paymentMethods

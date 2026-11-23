@@ -53,7 +53,7 @@ class ConnectedAppTest {
         val farmer = ApiUser("farmer", "farmer@example.test", "petani", "active")
         val qris = json("id" to "qris-id", "methodType" to "qris", "accountHolderName" to "Asep Laris", "hasQrisImage" to true)
         compose.setContent { PanenkuTheme { ConnectedAccount(ConnectedState(user = farmer, paymentMethods = listOf(qris)), vm) } }
-        compose.onNodeWithText("Ganti QRIS").performClick()
+        compose.onNodeWithText("Ganti QRIS").performScrollTo().performClick()
         compose.onNodeWithText("Ganti QRIS terpilih").assertExists()
         compose.onNodeWithText("Batal ganti QRIS").assertExists()
     }
