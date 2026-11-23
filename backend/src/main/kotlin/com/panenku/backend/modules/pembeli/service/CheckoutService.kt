@@ -28,7 +28,7 @@ class CheckoutService(
     private val history: OrderStatusHistoryRepository, private val scheduling: SchedulingService,
     private val mapper: ObjectMapper, private val clock: Clock,
     private val paymentDestinations: PaymentDestinationService, private val fulfillmentOptions: FulfillmentOptionsService,
-    private val quotes: CheckoutQuoteService
+    private val quotes: CheckoutQuoteService, private val notifications: NotificationService
 ) {
     @Transactional
     fun checkout(actor: UUID, key: String, request: CheckoutRequest): OrderDTO {
@@ -99,6 +99,7 @@ class CheckoutService(
         history.save(OrderStatusHistory(orderId = order.id, actorId = actor, changedAt = now, note = "Checkout dan reservasi stok."))
         // Explicit flush also surfaces DB constraint errors before returning success; any failure rolls everything back.
         orders.flush()
+        notifications.create(farmerId, "Pesanan baru", "Pesanan #${order.id.toString().take(8)} menunggu respons Anda.", "order", "/orders/${order.id}", now)
         return dto(order)
     }
     private fun dto(order: Order): OrderDTO = OrderDTO(order.id, order.orderStatus, order.paymentStatus, order.subtotalItems,

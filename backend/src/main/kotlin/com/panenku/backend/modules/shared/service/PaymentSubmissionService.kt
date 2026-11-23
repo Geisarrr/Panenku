@@ -51,6 +51,7 @@ class PaymentSubmissionService(
     private val products: ProductRepository, private val reservations: StockReservationRepository,
     private val destinations: PaymentDestinationService,
     private val mapper: ObjectMapper, private val clock: Clock, private val scheduleGuard: OrderScheduleGuard,
+    private val notifications: NotificationService,
     @Value("\${panenku.storage.local-dir:}") private val directory: String
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -96,6 +97,8 @@ class PaymentSubmissionService(
             proof_image_path,status,submitted_at,original_file_name,file_size_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             id, orderId, actor, key, hash, order.totalPayment, path, transition.paymentStatus, Timestamp.from(now), originalName, bytes.size.toLong())
         changeOrder(order, transition, actor, "pembeli", "Pembeli mengirim bukti pembayaran.", now)
+        notifications.create(order.farmerId, "Bukti pembayaran baru", "Pembeli mengunggah bukti pembayaran untuk pesanan #${order.id.toString().take(8)}.",
+            "payment", "/orders/${order.id}", now)
         return PaymentSubmissionDTO(id, orderId, transition.paymentStatus, order.totalPayment, now, null, null, null, originalName, bytes.size.toLong())
     }
 
@@ -120,6 +123,9 @@ class PaymentSubmissionService(
             WHERE id=?""", transition.paymentStatus, decision, reason, Timestamp.from(now), submission.view.id)
         changeOrder(order, transition, actor, "petani", if (decision == "terima") "Petani menerima bukti pembayaran."
             else "Petani menolak bukti pembayaran. Alasan: $reason", now)
+        notifications.create(order.buyerId, if (decision == "terima") "Pembayaran terverifikasi" else "Bukti pembayaran ditolak",
+            if (decision == "terima") "Pesanan #${order.id.toString().take(8)} sedang diproses petani." else "Silakan unggah bukti pembayaran baru untuk pesanan #${order.id.toString().take(8)}.",
+            "payment", "/orders/${order.id}", now)
         return submission.view.copy(status = transition.paymentStatus, decision = decision, reason = reason, decidedAt = now)
     }
 
