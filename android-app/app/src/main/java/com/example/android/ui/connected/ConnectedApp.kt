@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.gson.JsonObject
+import id.panenku.app.ui.connected.farmer.FarmerConnectedApp
 import id.panenku.app.R
 import id.panenku.app.data.remote.*
 import id.panenku.app.ui.components.*
@@ -32,6 +33,8 @@ fun ConnectedPanenkuApp(vm: ConnectedViewModel = viewModel()) {
         PanenkuOpeningFlow(state.busy, vm::login, vm::registerAccount,
             farmer = state.farmerOnboarding, onPrepareFarmer = vm::prepareFarmerAccount,
             onVerifyFarmer = vm::submitFarmerRegistration, onVerificationExit = vm::finishFarmerVerification)
+    } else if (state.user!!.role == "petani") {
+        key(state.user!!.id) { FarmerConnectedApp(state, vm) }
     } else key(state.user!!.id) {
         var screen by rememberSaveable { mutableStateOf(if (state.user!!.role == "admin") "admin" else "catalog") }
         var orderId by rememberSaveable { mutableStateOf("") }

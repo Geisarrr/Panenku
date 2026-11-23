@@ -32,10 +32,13 @@ data class ConnectedState(
     val quote: JsonObject? = null, val checkoutBody: JsonObject? = null,
     val image: ByteArray? = null, val profile: JsonObject? = null,
     val page: Int = 0, val more: Boolean = false,
+    val farmerOrderProofs: Map<String, List<JsonObject>> = emptyMap(),
+    val farmerVerification: JsonObject? = null,
+    val farmerRefund: JsonObject? = null, val farmerRefundOrder: JsonObject? = null,
+    val farmerQrisId: String? = null, val farmerQrisImage: ByteArray? = null,
     val farmerOnboarding: FarmerOnboardingState = FarmerOnboardingState()
 )
-class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
-    private val api = PanenkuApi(BuildConfig.API_BASE_URL)
+class ConnectedViewModel @JvmOverloads constructor(app: Application, private val api: PanenkuApi = PanenkuApi(BuildConfig.API_BASE_URL)) : AndroidViewModel(app) {
     private val enrollment = FarmerEnrollment(api)
     private var farmerDraft: RegistrationInput? = null
     private var farmerDummyId = newDummyId()
@@ -127,6 +130,56 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         val rows = result.list("items")
         set { it.copy(products = if (page == 0) rows else (it.products + rows).distinctBy { p -> p.text("id") },
             page = page, more = (page + 1L) * 20 < result.long("totalElements")) }
+    }
+    /** One serialized snapshot prevents tab loads from being dropped while another request is busy. */
+    fun farmerWorkspace() = run {
+        require(role == "petani") { "Gunakan akun petani." }
+        suspend fun allPages(path: String): List<JsonObject> {
+            val rows = mutableListOf<JsonObject>()
+            var page = 0
+            do {
+                val result = api.get("$path?page=$page&size=20").asJsonObject
+                val batch = result.list("items")
+                rows.addAll(batch)
+                page++
+            } while (batch.isNotEmpty() && page.toLong() * 20 < result.long("totalElements"))
+            return rows
+        }
+        val products = allPages("petani/products")
+        val orders = allPages("petani/orders")
+        val profile = api.get("petani/profile").asJsonObject
+        val methods = api.get("petani/payment-methods").rows()
+        val commodities = api.get("buyer/commodities").rows()
+        val proofs = orders.filter { it.text("orderStatus") == "verifikasi_pembayaran" }.associate { order ->
+            order.text("orderId") to api.get("petani/orders/${order.text("orderId")}/payment-proofs").rows()
+        }
+        set { it.copy(products = products, orders = orders, profile = profile, paymentMethods = methods,
+            commodities = commodities, farmerOrderProofs = proofs, page = 0, more = false) }
+    }
+    fun farmerOrder(id: String) = run {
+        require(role == "petani") { "Gunakan akun petani." }
+        detail(id)
+        if (state.value.detail?.text("orderStatus") == "verifikasi_pembayaran") {
+            val proofs = api.get("petani/orders/$id/payment-proofs").rows()
+            val destination = api.get("petani/orders/$id/payment-destination").asJsonObject
+            set { it.copy(proofs = proofs, destination = destination) }
+        }
+    }
+    /** Create a draft before its first photo upload; remember its ID for safe UI retries. */
+    fun saveFarmerProduct(id: String?, body: JsonObject, photo: String?, assigned: (String) -> Unit, done: () -> Unit) = run("Produk tersimpan.") {
+        require(role == "petani") { "Gunakan akun petani." }
+        val productId = id ?: kotlin.run {
+            val draft = body.deepCopy().apply { addProperty("publicationStatus", "draft") }
+            val created = api.post("petani/products", draft).asJsonObject
+            val newId = created.text("id").also { require(it.isNotBlank()) { "ID produk belum diterima." } }
+            set { it.copy(products = it.products + created) }
+            assigned(newId)
+            newId
+        }
+        if (photo != null) upload("petani/products/$productId/photo", photo, partName = "file")
+        val updated = api.put("petani/products/$productId", body).asJsonObject
+        set { it.copy(products = it.products.filterNot { p -> p.text("id") == productId } + updated) }
+        done()
     }
     fun cart() = run { val cart = api.get("buyer/cart").asJsonObject; set { it.copy(cart = cart) } }
     fun add(product: String, quantity: String) = run("Keranjang tersimpan di server.") {
@@ -410,6 +463,56 @@ class ConnectedViewModel(app: Application) : AndroidViewModel(app) {
         val updated = api.get("petani/products/$id").asJsonObject
         set { it.copy(products = it.products.map { product -> if (product.text("id") == id) updated else product }) }
     }
+    fun saveFarmerIdentity(owner: String, phone: String, store: String, done: () -> Unit) = run("Profil tersimpan.") {
+        require(role == "petani") { "Gunakan akun petani." }
+        val current = api.get("petani/profile").asJsonObject
+        val account = api.put("auth/profile", json("fullName" to owner, "contactPhone" to phone.takeIf(String::isNotBlank))).asJsonObject
+        val partial = current.deepCopy().apply { addProperty("ownerName", account.text("fullName")); addProperty("contactPhone", account.text("contactPhone")) }
+        set { it.copy(profile = partial) }
+        val body = id.panenku.app.ui.connected.farmer.farmerProfileBody(current, store = store)
+        val profile = api.put("petani/profile", body).asJsonObject
+        set { it.copy(profile = profile) }; done()
+    }
+    fun farmerQris(id: String) = run {
+        require(role == "petani") { "Gunakan akun petani." }
+        set { it.copy(farmerQrisId = id, farmerQrisImage = null) }
+        val bytes = api.image("petani/payment-methods/$id/qris")
+        set { it.copy(farmerQrisImage = bytes) }
+    }
+    fun farmerVerification() = run {
+        val status = api.get("petani/ktp/status").asJsonObject
+        set { it.copy(farmerVerification = status) }
+    }
+    fun farmerResubmitKtp(uri: String) = run("Dokumen contoh dikirim ulang untuk verifikasi.") {
+        require(role == "petani") { "Gunakan akun petani." }
+        val current = state.value.farmerVerification ?: error("Muat status verifikasi terlebih dahulu.")
+        require(current.text("status") in listOf("ditolak", "belum_diajukan")) { "Pengajuan tidak sedang memerlukan perbaikan." }
+        val name = current.text("dummyName").ifBlank { state.value.profile?.text("ownerName").orEmpty() }
+        require(name.isNotBlank()) { "Lengkapi nama pemilik terlebih dahulu." }
+        val nik = current.text("dummyNik").takeIf { Regex("DUMMY-[A-Z0-9]{3,32}").matches(it) } ?: farmerDummyId
+        val status = upload("petani/ktp/application", uri, mapOf("dummyName" to name, "dummyNik" to nik)).asJsonObject
+        set { it.copy(farmerVerification = status) }
+        val profile = api.get("petani/profile").asJsonObject; set { it.copy(profile = profile) }
+    }
+    fun farmerRefundDetail(id: String) = run {
+        set { it.copy(farmerRefund = null, farmerRefundOrder = null) }
+        val refund = api.get("petani/refunds/$id").asJsonObject
+        set { it.copy(farmerRefund = refund) }
+        val order = api.get("petani/orders/${refund.text("orderId")}").asJsonObject
+        set { it.copy(farmerRefundOrder = order) }
+    }
+    private fun updateFarmerRefund(refund: JsonObject) = set { state -> state.copy(farmerRefund = refund,
+        refunds = state.refunds.map { if (it.text("id") == refund.text("id")) refund else it }) }
+    fun farmerRefundDecision(id: String, accepted: Boolean, reason: String, done: () -> Unit) = run("Tanggapan refund tersimpan.") {
+        require(accepted || reason.isNotBlank()) { "Alasan penolakan wajib diisi." }
+        val refund = api.put("petani/refunds/$id/respond", json("decision" to if(accepted) "terima" else "tolak", "reason" to reason.trim())).asJsonObject
+        updateFarmerRefund(refund); done()
+    }
+    fun farmerRefundTransfer(id: String, uri: String) = run("Bukti transfer balik tersimpan. Menunggu konfirmasi pembeli.") {
+        val refund = upload("petani/refunds/$id/transfer-proof", uri).asJsonObject
+        updateFarmerRefund(refund)
+    }
+
     fun ktp(name: String, nik: String, uri: String) = run("Dokumen pengembangan dikirim untuk verifikasi.") {
         upload("petani/ktp/application", uri, mapOf("dummyName" to name, "dummyNik" to nik))
         val profile = api.get("petani/profile").asJsonObject; set { it.copy(profile = profile) }
