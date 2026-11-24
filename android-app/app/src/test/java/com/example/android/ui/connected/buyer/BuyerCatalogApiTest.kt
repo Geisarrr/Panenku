@@ -69,4 +69,32 @@ class BuyerCatalogApiTest {
         assertEquals("orders" to "abc-123",buyerLink("/orders/abc-123/schedule"));assertEquals("refunds" to "r",buyerLink("/refunds/r"))
     }
     @Test fun fractionalKgUsesTheSameRupiahRoundingAsBackend(){assertEquals(13,buyerLineTotal(1250,"0.01"));assertEquals(1563,buyerLineTotal(1250,"1.25"));assertEquals(0,buyerLineTotal(1250,"invalid"))}
+    @Test fun insufficientStockItemCanBeReducedAndSelectedForDeletion() {
+        val shortage="""{"items":[{"id":"short","productId":"p1","quantityKg":3,"stockAvailable":1,"available":false}],"totalElements":1}"""
+        ok(shortage);vm.buyerCart();idle();req()
+        vm.buyerSelectCart("short",true)
+        assertTrue(vm.state.value.buyerSelected.contains("short"))
+        ok("{}");ok("{\"items\":[]}")
+        vm.buyerQuantity("short","0.5");idle()
+        val sent=req();assertEquals("PUT",sent.method)
+        assertTrue(sent.body.readUtf8().contains("0.5"));req();assertNull(vm.state.value.error)
+    }
+
+    @Test fun unavailableProductCanBeSelectedAndDeleted() {
+        ok("{\"items\":[{\"id\":\"inactive\",\"productId\":\"p1\",\"quantityKg\":1,\"stockAvailable\":0,\"available\":false}]}")
+        vm.buyerCart();idle();req();vm.buyerSelectCart("inactive",true)
+        ok("{}");ok("{\"items\":[]}");vm.buyerDeleteSelected();idle()
+        val deletion=req();assertEquals("DELETE",deletion.method)
+        assertEquals("/api/v1/buyer/cart/items/inactive",deletion.path);req()
+        assertTrue(vm.state.value.cart.list("items").isEmpty());assertNull(vm.state.value.error)
+    }
+    @Test fun inactiveProductQuantityStillRequiresBackendApproval() {
+        ok("{\"items\":[{\"id\":\"inactive\",\"productId\":\"p1\",\"quantityKg\":3,\"stockAvailable\":10,\"available\":false}]}")
+        vm.buyerCart();idle();req()
+        server.enqueue(MockResponse().setResponseCode(409).setBody("{\"success\":false,\"message\":\"Produk nonaktif\"}"))
+        vm.buyerQuantity("inactive","1");idle()
+        assertEquals("PUT",req().method);assertNotNull(vm.state.value.error)
+        assertEquals("3",vm.state.value.cart.list("items").single().text("quantityKg"))
+    }
+
 }

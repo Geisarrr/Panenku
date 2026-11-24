@@ -69,4 +69,16 @@ class BuyerCatalogScreensTest {
     @Test @Config(qualifiers="w375dp-h812dp-mdpi") fun filledCartUsesSelectedTotalAndRequiresDeleteConfirmation(){host{BuyerCartScreen(BuyerCatalogFixtures.state(),vm,{},{},{})};capture("cart");compose.onNodeWithText("Hapus").performClick();compose.onNodeWithText("Hapus produk terpilih?").assertIsDisplayed();compose.onNodeWithText("Kembali").performClick()}
     @Test @Config(qualifiers="w375dp-h812dp-mdpi") fun emptyCartOffersReturnToShopping(){var back=false;host{BuyerCartScreen(BuyerCatalogFixtures.state().copy(cart=json("items" to emptyList<JsonObject>())),vm,{back=true},{},{})};capture("empty-cart");compose.onNodeWithText("Buat Pesanan").assertDoesNotExist();compose.onNodeWithText("Mulai belanja").performClick();assertTrue(back)}
     @Test @Config(qualifiers="w375dp-h1071dp-mdpi") fun notificationsFilterActualUnreadRows(){host(paper=BPaper){BuyerNotificationsScreen(BuyerCatalogFixtures.state(),vm,{},{_,_->})};capture("notifications");compose.onNodeWithText("Belum dibaca (3)").performClick();compose.onNodeWithText("Tiket eskalasi tercatat").assertDoesNotExist();compose.onNodeWithText("Pesanan tiba di alamatmu").assertIsDisplayed()}
+    @Test fun shortageRowOffersCorrectionAndRemovalButCannotCheckout() {
+        val row=json("id" to "short","productId" to "p1","name" to "Sawi","quantityKg" to 3,
+            "stockAvailable" to 1,"available" to false,"pricePerKg" to 5000)
+        val state=BuyerCatalogFixtures.state().copy(cart=json("items" to listOf(row)),
+            buyerSelectionInitialized=true,buyerSelected=emptySet())
+        host(null) { BuyerCartScreen(state,vm,{}, {}, {}) }
+        compose.onNodeWithText("Buat Pesanan").assertIsNotEnabled()
+        // Dialog/IME layout is checked on-device; Robolectric covers actionable controls here.
+        compose.onNodeWithText("3 kg").performScrollTo().assertIsEnabled().assertHasClickAction()
+        compose.onAllNodes(isToggleable())[1].assertIsEnabled()
+    }
+
 }

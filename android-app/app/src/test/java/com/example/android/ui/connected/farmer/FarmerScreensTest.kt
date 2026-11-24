@@ -130,6 +130,24 @@ class FarmerScreensTest {
             catch (e: Throwable) { throw AssertionError("After navigation: requests=${server.requestCount}; busy=${vm.state.value.busy}; error=${vm.state.value.error}", e) }
             compose.onNodeWithText("Stok & Produk").assertExists()
             compose.onNodeWithText("Toko API · 0 produk").assertExists()
+            fun requestPath() = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)!!.path
+            repeat(11) { requestPath() }
+            fun settled() { compose.waitUntil(15000) { compose.runOnIdle {}; !vm.state.value.busy }; compose.waitForIdle() }
+            enqueue("{\"ownerName\":\"Petani API\",\"storeName\":\"Toko API\"}"); enqueue("[]")
+            compose.onNodeWithText("Profil",useUnmergedTree=true).performClick();settled()
+            assertEquals("/api/v1/petani/profile",requestPath());assertEquals("/api/v1/petani/payment-methods",requestPath())
+            enqueue("{\"items\":[{\"id\":\"n1\",\"title\":\"Pesanan baru\",\"isRead\":false}],\"unreadCount\":1}")
+            compose.onNodeWithText("Notifikasi transaksi").performScrollTo().performClick();settled()
+            assertEquals("/api/v1/notifications?size=50",requestPath())
+            compose.onNodeWithText("Pesanan baru").assertExists()
+            enqueue("{}"); enqueue("{\"items\":[{\"id\":\"n1\",\"title\":\"Pesanan baru\",\"isRead\":true}],\"unreadCount\":0}")
+            compose.onNodeWithText("Tandai sudah dibaca").performScrollTo().performClick();settled()
+            assertEquals("/api/v1/notifications/n1/read",requestPath());assertEquals("/api/v1/notifications?size=50",requestPath())
+            compose.onNodeWithText("Sudah dibaca").assertExists()
+            enqueue("{\"ownerName\":\"Petani API\",\"storeName\":\"Toko API\"}"); enqueue("[]")
+            compose.onNodeWithContentDescription("Kembali").performClick();settled()
+            assertEquals("/api/v1/petani/profile",requestPath());assertEquals("/api/v1/petani/payment-methods",requestPath())
+
         } finally { server.shutdown(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
     @Test fun stockFiltersAndSearchUseServerRows() {

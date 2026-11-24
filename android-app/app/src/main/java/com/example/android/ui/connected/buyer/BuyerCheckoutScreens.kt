@@ -28,7 +28,15 @@ import id.panenku.app.ui.connected.*
     val selectedDistrict = district.ifBlank { address?.district.orEmpty() }
     val inArea = selectedDistrict in s.deliveryAreas
     val validAddress = method == "pickup" || (address != null && inArea && address.snapshot().length <= 2000)
-    val quote = s.quote
+    // A restored screen must not confirm a preview for a different method or schedule.
+    // Amounts remain authoritative values from the server.
+    val quote = s.quote?.takeIf {
+        it.text("fulfillmentMethod") == method &&
+            it.text("scheduledDate") == date && it.text("scheduledTimeSlot") == slot &&
+            (method != "pickup" || it.long("deliveryFee") == 0L) &&
+            (method != "delivery" || (it.text("deliveryDistrict") == selectedDistrict &&
+                it.text("deliveryAddress") == address?.snapshot()))
+    }
     val rows = selectedBuyerRows(s.cart,s.buyerSelectionInitialized,s.buyerSelected)
     BPage("Checkout","Periksa pesanan sebelum dibuat",back,brand=false,paper=FPaper,footer={
         Column(Modifier.fillMaxWidth().background(Color.White).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {

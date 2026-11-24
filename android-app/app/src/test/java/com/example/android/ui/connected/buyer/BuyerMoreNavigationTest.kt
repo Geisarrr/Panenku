@@ -45,6 +45,14 @@ class BuyerMoreNavigationTest {
             compose.onNodeWithContentDescription("Profil").performClick();idle();assertEquals("/api/v1/auth/profile",req().path)
             compose.onNodeWithTag("buyer-input-Nama pembeli / usaha").assertTextEquals("Pemilik")
             compose.onNodeWithTag("buyer-input-Email").assertIsNotEnabled()
+            ok("{\"items\":[]}")
+            compose.onNodeWithText("Laporan pembayaran terlambat").performScrollTo().performClick();idle()
+            assertEquals("/api/v1/buyer/late-payment-reports?size=50",req().path)
+            compose.onNodeWithText("Bantuan pembayaran").assertIsDisplayed()
+            compose.onNodeWithText("Kirim laporan").assertIsNotEnabled()
+            ok("{\"fullName\":\"Pemilik\"}")
+            compose.onNodeWithContentDescription("Kembali").performClick();idle()
+            assertEquals("/api/v1/auth/profile",req().path)
         }finally{server.shutdown()}
     }
 }

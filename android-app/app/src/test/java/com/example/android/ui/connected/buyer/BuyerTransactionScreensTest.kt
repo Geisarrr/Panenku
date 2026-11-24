@@ -35,7 +35,7 @@ internal object BuyerTransactionFixtures {
     fun state(status:String="menunggu_penerimaan"):ConnectedState {
         val addr=SavedBuyerAddress(id="one",label="Dapur utama",recipient="Rina Catering",phone="0800 0000 0000",address="Gang H.Gumat 1 no.14, Lowokwaru, Kec Lowokwaru, Kota Malang, Jawatimur 64293",district="Lowokwaru",note="Dekat masjid al hidayah")
         val items=order().list("items").map { it.deepCopy().apply {addProperty("name",text("productNameSnapshot"));addProperty("pricePerKg",long("pricePerKgSnapshot"))} }
-        val quote=json("canCheckout" to true,"items" to items,"subtotalItems" to 200000,"deliveryFee" to 2500,"totalPayment" to 202500,"scheduledDate" to "2026-06-24","scheduledTimeSlot" to "09:00-12:00")
+        val quote=json("canCheckout" to true,"items" to items,"subtotalItems" to 200000,"fulfillmentMethod" to "pickup","deliveryFee" to 0,"totalPayment" to 200000,"scheduledDate" to "2026-06-24","scheduledTimeSlot" to "09:00-12:00")
         return ConnectedState(user=ApiUser("buyer","rina@example.test","pembeli","active"),detail=order(status),buyerTransactionLoaded=true,
             products=BuyerLocalFixtures.stock(),shippingEnabled=true,deliveryAreas=listOf("Lowokwaru"),buyerAddresses=listOf(addr),buyerAddressId=addr.id,
             cart=json("items" to items,"storeName" to "Darto Sobianto"),quote=quote,
@@ -91,4 +91,52 @@ class BuyerTransactionScreensTest {
         host{BuyerRefundScreen(s,vm,{}, {})};capture("refund")
         compose.onNodeWithText("Kirim pengajuan Rp202.500").performScrollTo().assertIsNotEnabled()
     }
+    @Test fun checkoutMustNotConfirmAQuoteForAnotherFulfillmentMethod() {
+        val state=BuyerTransactionFixtures.state().let { it.copy(quote=it.quote!!.deepCopy().apply {
+            addProperty("fulfillmentMethod","delivery")
+        }) }
+        host(FPaper) { BuyerCheckoutScreen(state,vm,{}, {}, {}) }
+        compose.onNodeWithTag("buyer-checkout-consent").assertDoesNotExist()
+        compose.onNodeWithText("Buat Pesanan").assertIsNotEnabled()
+        compose.onNodeWithText("Periksa total dahulu").assertExists()
+    }
+
+    @Test fun checkoutRejectsNonzeroPickupFee() {
+        val state=BuyerTransactionFixtures.state().let {
+            it.copy(quote=it.quote!!.deepCopy().apply {addProperty("deliveryFee",2500)})
+        }
+        host(FPaper) {BuyerCheckoutScreen(state,vm,{}, {}, {})}
+        compose.onNodeWithTag("buyer-checkout-consent").assertDoesNotExist()
+        compose.onNodeWithText("Buat Pesanan").assertIsNotEnabled()
+    }
+    @Test fun checkoutRejectsQuoteForOldDeliveryAddress() {
+        val state=BuyerTransactionFixtures.state().let {
+            it.copy(buyerFulfillment="delivery",quote=it.quote!!.deepCopy().apply {
+                addProperty("fulfillmentMethod","delivery")
+                addProperty("deliveryDistrict","Lowokwaru")
+                addProperty("deliveryAddress","Alamat lama")
+            })
+        }
+        host(FPaper) {BuyerCheckoutScreen(state,vm,{}, {}, {})}
+        compose.onNodeWithTag("buyer-checkout-consent").assertDoesNotExist()
+        compose.onNodeWithText("Buat Pesanan").assertIsNotEnabled()
+    }
+
+    @Test fun deliveryQuoteForSelectedAddressCanBeConfirmedWithServerTotal() {
+        val state=BuyerTransactionFixtures.state().let { state ->
+            state.copy(buyerFulfillment="delivery",quote=state.quote!!.deepCopy().apply {
+                addProperty("fulfillmentMethod","delivery")
+                addProperty("deliveryDistrict","Lowokwaru")
+                addProperty("deliveryAddress",state.buyerAddresses.single().snapshot())
+                addProperty("deliveryFee",2500)
+                addProperty("totalPayment",202500)
+            })
+        }
+        host(FPaper) {BuyerCheckoutScreen(state,vm,{}, {}, {})}
+        compose.onNodeWithText("Buat Pesanan").assertIsNotEnabled()
+        compose.onNodeWithTag("buyer-checkout-consent").performScrollTo().performClick()
+        compose.onNodeWithText("Buat Pesanan").assertIsEnabled()
+        compose.onAllNodesWithText("Rp202.500").assertCountEquals(2)
+    }
+
 }

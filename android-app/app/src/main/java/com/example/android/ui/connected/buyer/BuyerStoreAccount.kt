@@ -64,7 +64,7 @@ import id.panenku.app.ui.connected.*
     error?.let{AlertDialog(onDismissRequest={error=null},text={Text(it)},confirmButton={TextButton(onClick={error=null}){Text("OK")}})}
 }
 
-@Composable internal fun BuyerAccountScreen(s:ConnectedState,vm:ConnectedViewModel,back:()->Unit,addresses:()->Unit,orders:()->Unit,refunds:()->Unit,notifications:(()->Unit)?=null) {
+@Composable internal fun BuyerAccountScreen(s:ConnectedState,vm:ConnectedViewModel,back:()->Unit,addresses:()->Unit,orders:()->Unit,refunds:()->Unit,notifications:(()->Unit)?=null,latePayments:(()->Unit)?=null) {
     var name by rememberSaveable(s.user?.id,s.profile?.text("fullName")){mutableStateOf(s.profile?.text("fullName").orEmpty())}
     var phone by rememberSaveable(s.user?.id,s.profile?.text("contactPhone")){mutableStateOf(s.profile?.text("contactPhone").orEmpty())}
     var logout by remember{mutableStateOf(false)};var privacy by remember{mutableStateOf(false)}
@@ -85,6 +85,9 @@ import id.panenku.app.ui.connected.*
             BMenuRow(R.drawable.buyer_shared_location,"Alamat tersimpan","Kelola alamat pengiriman",addresses)
             FRule();BMenuRow(R.drawable.buyer8_menu_orders,"Pesanan saya","Pantau jadwal dan penerimaan",orders)
             FRule();BMenuRow(R.drawable.buyer8_help,"Refund & bantuan","Lihat pengajuan dan tiket eskalasi",refunds)
+        }
+        if(latePayments!=null) FCard("Bantuan pembayaran") {
+            BMenuRow(R.drawable.buyer8_help,"Laporan pembayaran terlambat","Laporkan transfer setelah pesanan kedaluwarsa",latePayments)
         }
         FCard("Preferensi & keamanan"){
             BMenuRow(R.drawable.buyer8_bell,"Notifikasi transaksi",if(notifications==null)"Pengaturan notifikasi Android" else "Pembayaran, pesanan, refund"){

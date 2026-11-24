@@ -74,6 +74,7 @@ import java.time.LocalDate
             FText("Akun & bantuan", 14f, 600)
             FCard {
                 FSettingsRow(R.drawable.farmer_verified, "Status verifikasi petani", "$verificationLabel · Lihat informasi verifikasi") { open("verification") }; FRule()
+                FSettingsRow(R.drawable.farmer_clock, "Notifikasi transaksi", "Pembayaran, pesanan, dan refund") { open("notifications") }; FRule()
                 FSettingsRow(R.drawable.farmer_lock, "Preferensi & Keamanan", "Notifikasi dan pengaturan aplikasi") { dialog = "preferences" }; FRule()
                 FSettingsRow(R.drawable.farmer_help, "Pusat Bantuan", "Panduan toko dan bantuan pesanan") { dialog = "help" }
             }
