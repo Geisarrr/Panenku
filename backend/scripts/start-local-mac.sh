@@ -26,6 +26,8 @@ export KTP_DUMMY_ENABLED=true
 # Optional local-only business-time shift for repeatable UAT; default remains real time.
 export PANENKU_DEV_CLOCK_OFFSET="${PANENKU_DEV_CLOCK_OFFSET:-PT0S}"
 export PAYMENT_STORAGE_LOCAL_DIR="$HOME/Library/Application Support/Panenku/private"
+mkdir -p "$PRODUCT_PHOTOS_LOCAL_DIR"
+chmod 700 "$PRODUCT_PHOTOS_LOCAL_DIR"
 mkdir -p "$PAYMENT_STORAGE_LOCAL_DIR"
 chmod 700 "$PAYMENT_STORAGE_LOCAL_DIR"
 docker compose up -d postgres

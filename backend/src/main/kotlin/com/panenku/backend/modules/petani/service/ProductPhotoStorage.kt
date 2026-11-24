@@ -28,11 +28,11 @@ class ProductPhotoStorage(
     @Value("\${panenku.product-photos.access-key}") private val accessKey: String,
     @Value("\${panenku.product-photos.secret-key}") private val secretKey: String,
     @Value("\${panenku.product-photos.bucket:panenku-products}") private val bucket: String,
-    private val local: LocalProductPhotoStore? = null
+    private val local: LocalProductPhotoStore
 ) {
     private val client by lazy { buildClient(endpoint) }
     private val signingClient by lazy { buildClient(publicEndpoint) }
-    private fun configured() = enabled && (local?.selected == true || (accessKey.isNotBlank() && secretKey.isNotBlank()))
+    private fun configured() = enabled && (local.selected || (accessKey.isNotBlank() && secretKey.isNotBlank()))
     private fun buildClient(address: String): MinioClient {
         if (!configured()) unavailable()
         val url = if (address.contains("://")) address else "http://$address"
@@ -50,14 +50,14 @@ class ProductPhotoStorage(
         if (!policy.isNullOrBlank()) throw ApiException(HttpStatus.SERVICE_UNAVAILABLE, "PHOTO_BUCKET_NOT_PRIVATE", "Bucket foto produk harus privat tanpa bucket policy publik.")
     }
     internal fun put(product: Product, image: ValidatedProductImage): String = storageCall {
-        if (local?.selected == true) return@storageCall local.put(product, image)
+        if (local.selected) return@storageCall local.put(product, image)
         privateBucket()
         val key = "products/${product.farmerId}/${product.id}/${UUID.randomUUID()}.${image.extension}"
         client.putObject(PutObjectArgs.builder().bucket(bucket).`object`(key)
             .stream(ByteArrayInputStream(image.bytes), image.bytes.size.toLong(), -1).contentType(image.contentType).build())
         key
     }
-    fun managed(product: Product, key: String?): Boolean = if (local?.selected == true) local.managed(product, key)
+    fun managed(product: Product, key: String?): Boolean = if (local.selected) local.managed(product, key)
         else key != null && Regex("products/${product.farmerId}/${product.id}/[0-9a-f-]{36}\\.(jpg|png)").matches(key)
 
     fun access(product: Product): ProductPhotoAccess? {
@@ -65,7 +65,7 @@ class ProductPhotoStorage(
         return runCatching { signed(product.photoUrl!!) }.getOrNull()
     }
     internal fun signed(key: String): ProductPhotoAccess = storageCall {
-        if (local?.selected == true) return@storageCall local.signed(key)
+        if (local.selected) return@storageCall local.signed(key)
         val url = signingClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder().method(Method.GET)
             .bucket(bucket).`object`(key).expiry(900, TimeUnit.SECONDS).build())
         val query = URI(url).rawQuery.split('&').associate {
@@ -76,7 +76,7 @@ class ProductPhotoStorage(
         ProductPhotoAccess(url, at)
     }
     internal fun removeUncommitted(key: String) = storageCall {
-        if (local?.selected == true) return@storageCall local.delete(key)
+        if (local.selected) return@storageCall local.delete(key)
         client.removeObject(RemoveObjectArgs.builder().bucket(bucket).`object`(key).build())
     }
     private fun unavailable(): Nothing = throw ApiException(HttpStatus.SERVICE_UNAVAILABLE, "PRODUCT_PHOTOS_UNAVAILABLE", "Penyimpanan foto produk belum tersedia. Periksa konfigurasi storage lokal atau MinIO foto produk.")
