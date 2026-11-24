@@ -57,6 +57,25 @@ Android mengelola tampilan dan state melalui ViewModel, StateFlow, dan Coroutine
 | Data | PostgreSQL, Spring Data JPA, JdbcTemplate, Flyway |
 | Development | Gradle, Docker Compose, MinIO atau storage lokal privat |
 
+### Peran teknologi
+
+| Teknologi | Penggunaan di Panenku |
+| --- | --- |
+| **Kotlin** | Bahasa pemrograman untuk aplikasi Android dan backend. |
+| **Jetpack Compose & Material 3** | Membangun tampilan dan komponen antarmuka Android secara deklaratif. |
+| **ViewModel & StateFlow** | Mengelola dan menyajikan state layar, seperti produk, pesanan, dan status permintaan. |
+| **Kotlin Coroutines** | Menjalankan pekerjaan asinkron, termasuk permintaan jaringan, agar antarmuka tetap responsif. |
+| **Retrofit, OkHttp & Gson** | Mengirim permintaan HTTP ke REST API dan mengolah data JSON. |
+| **Coil** | Memuat dan menampilkan gambar pada antarmuka Compose. |
+| **Spring Boot** | Menjalankan layanan backend dan menyediakan endpoint REST API. |
+| **Spring Security & JWT** | Mengautentikasi pengguna dan membatasi akses sesuai peran. |
+| **BCrypt** | Membuat hash kata sandi untuk disimpan, tanpa menyimpan kata sandi dalam bentuk asli. |
+| **PostgreSQL** | Menyimpan data aplikasi, termasuk pengguna, produk, stok, dan transaksi. |
+| **Spring Data JPA & JdbcTemplate** | Mengakses data melalui repository JPA dan query SQL sesuai kebutuhan fitur. |
+| **Flyway** | Mengelola versi dan migrasi skema database. |
+| **MinIO / storage lokal privat** | Menyimpan foto produk dan berkas UAT; pilihan penyimpanan bergantung pada konfigurasi backend. |
+| **Gradle & Docker Compose** | Gradle membangun dan menguji proyek; Docker Compose menjalankan layanan pendukung dan backend pada konfigurasi integrasi lokal. |
+
 ## Struktur proyek
 
 ```text
