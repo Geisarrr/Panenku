@@ -55,9 +55,10 @@ object OrderStatusRules {
      *
      * Alur:
      * - diproses + pickup  -> siap_diambil
-     * - diproses + delivery -> diantar
+     * - diproses + delivery -> diantar (stok fisik dipenuhi saat berangkat)
      * - diproses -> gagal_dipenuhi (lepas reservasi)
-     * - siap_diambil/diantar -> menunggu_penerimaan (stok fisik dipenuhi)
+     * - siap_diambil -> menunggu_penerimaan (stok fisik dipenuhi saat diserahkan)
+     * - diantar -> menunggu_penerimaan (idempoten; juga memenuhi reservasi delivery lama)
      */
     fun fulfillmentTarget(
         currentStatus: String,
@@ -70,7 +71,7 @@ object OrderStatusRules {
                 FulfillmentTransition(SIAP_DIAMBIL, FulfillmentAction.NONE)
 
             currentStatus == DIPROSES && requested == DIANTAR && fulfillmentMethod == "delivery" ->
-                FulfillmentTransition(DIANTAR, FulfillmentAction.NONE)
+                FulfillmentTransition(DIANTAR, FulfillmentAction.FULFILL_STOCK)
 
             currentStatus == DIPROSES && requested == GAGAL_DIPENUHI ->
                 FulfillmentTransition(GAGAL_DIPENUHI, FulfillmentAction.RELEASE_STOCK)

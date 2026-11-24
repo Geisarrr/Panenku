@@ -146,14 +146,16 @@ class ConnectedViewModel @JvmOverloads constructor(app: Application,
     fun buyerSelectCart(id:String?,checked:Boolean) {
         if(state.value.busy)return
         val rows=state.value.cart.list("items")
-        val targets=if(id==null)rows.filter { it.flag("available") }.map { it.text("id") }.toSet() else rows.filter { it.text("id")==id && (!checked || it.flag("available")) }.map { it.text("id") }.toSet()
+        // Individual unavailable items remain selectable for removal, never for checkout.
+        val targets=if(id==null)rows.filter { it.flag("available") }.map { it.text("id") }.toSet() else rows.filter { it.text("id")==id }.map { it.text("id") }.toSet()
         set { it.copy(buyerSelected=if(checked)it.buyerSelected+targets else if(id==null)emptySet() else it.buyerSelected-targets,buyerSelectionInitialized=true,fulfillment=null,quote=null,checkoutBody=null) }
     }
     fun buyerFulfillment(method:String) {require(method in setOf("pickup","delivery"));if(state.value.busy)return;set { it.copy(buyerFulfillment=method,fulfillment=null,quote=null,checkoutBody=null) }}
     fun buyerQuantity(id:String,value:String) = run {
         val row=state.value.cart.list("items").firstOrNull { it.text("id")==id } ?: error("Item tidak ditemukan.")
         val amount=kg(value)
-        require(row.flag("available") && amount<=row.text("stockAvailable").toBigDecimal()) { "Jumlah melebihi stok tersedia." }
+        // A shortage describes the old quantity; the backend validates the replacement.
+        require(amount<=row.text("stockAvailable").toBigDecimal()) { "Jumlah melebihi stok tersedia." }
         api.put("buyer/cart/items/$id",json("quantityKg" to amount));loadBuyerCart()
     }
     fun buyerDeleteSelected() = run {

@@ -60,7 +60,7 @@ import java.time.*
                 FText(s.cart.text("storeName"),13f,600,FForest)
                 rows.forEach{row->
                     Row(verticalAlignment=Alignment.Top,horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                        Checkbox(row.text("id") in s.buyerSelected,{vm.buyerSelectCart(row.text("id"),it)},Modifier.size(20.dp),enabled=!s.busy && (row.flag("available") || row.text("id") in s.buyerSelected),colors=CheckboxDefaults.colors(checkedColor=FGreen))
+                        Checkbox(row.text("id") in s.buyerSelected,{vm.buyerSelectCart(row.text("id"),it)},Modifier.size(20.dp),enabled=!s.busy,colors=CheckboxDefaults.colors(checkedColor=FGreen))
                         FPhoto(row.text("photoAccessUrl"),row.text("name"),Modifier.size(50.dp).clickable(role=Role.Button){product(row.text("productId"))})
                         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)){
                             FText(row.text("name"),13f,500);FText("${money(row.long("pricePerKg"))}/kg",10f,color=FMuted)
@@ -89,9 +89,9 @@ import java.time.*
     var editing by remember {mutableStateOf(false)}
     var value by rememberSaveable(row.text("id"),row.text("quantityKg")){mutableStateOf(quantity(row.text("quantityKg")))}
     Row(Modifier.background(Color.White,CircleShape).border(1.dp,FBorder,CircleShape).height(32.dp),verticalAlignment=Alignment.CenterVertically){
-        Box(Modifier.size(26.dp).clickable(enabled=row.flag("available") && !busy,role=Role.Button){val next=(row.text("quantityKg").toBigDecimalOrNull() ?: java.math.BigDecimal.ONE)-java.math.BigDecimal.ONE;if(next.signum()>0)save(next.toPlainString())},contentAlignment=Alignment.Center){FText("−",16f,600,color=FMuted)}
-        FText("${quantity(row.text("quantityKg"))} kg",10f,600,modifier=Modifier.clickable(enabled=row.flag("available") && !busy,role=Role.Button){editing=true})
-        Box(Modifier.size(26.dp).clickable(enabled=row.flag("available") && !busy,role=Role.Button){val next=(row.text("quantityKg").toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO)+java.math.BigDecimal.ONE;save(next.toPlainString())},contentAlignment=Alignment.Center){FText("+",16f,600,color=FGreen)}
+        Box(Modifier.size(26.dp).clickable(enabled=!busy,role=Role.Button){val next=(row.text("quantityKg").toBigDecimalOrNull() ?: java.math.BigDecimal.ONE)-java.math.BigDecimal.ONE;if(next.signum()>0)save(next.toPlainString())},contentAlignment=Alignment.Center){FText("−",16f,600,color=FMuted)}
+        FText("${quantity(row.text("quantityKg"))} kg",10f,600,modifier=Modifier.clickable(enabled=!busy,role=Role.Button){editing=true})
+        Box(Modifier.size(26.dp).clickable(enabled=!busy,role=Role.Button){val next=(row.text("quantityKg").toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO)+java.math.BigDecimal.ONE;save(next.toPlainString())},contentAlignment=Alignment.Center){FText("+",16f,600,color=FGreen)}
     }
     if(editing)AlertDialog(onDismissRequest={editing=false},title={Text("Jumlah dalam kg")},text={FField("Jumlah ${row.text("id")}",value,{value=it},keyboard=KeyboardType.Decimal)},confirmButton={TextButton(onClick={editing=false;save(value)}){Text("Simpan")}},dismissButton={TextButton(onClick={editing=false}){Text("Kembali")}})
 }

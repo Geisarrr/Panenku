@@ -114,4 +114,11 @@ class FarmerSettingsScreensTest {
         host { FarmerVerificationScreen(s,{}, {}) {fail("Already approved")} }
         compose.onNodeWithText("Pilih dokumen & kirim ulang").assertDoesNotExist()
     }
+    @Test fun profileOffersTransactionNotifications() {
+        var route=""
+        host { FarmerProfileScreen(FarmerSettingsFixtures.state(),{}, {route=it}, {_,_,_,_->}, {}) }
+        compose.onNodeWithText("Notifikasi transaksi").performScrollTo().performClick()
+        assertEquals("notifications",route)
+    }
+
 }

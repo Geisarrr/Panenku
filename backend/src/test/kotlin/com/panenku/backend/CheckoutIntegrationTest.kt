@@ -2196,8 +2196,24 @@ class CheckoutIntegrationTest {
         atSchedule(id)
         val shipped = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("diantar"))
         assertEquals("diantar", shipped.orderStatus)
+        // PRD: goods leave physical stock when delivery starts, not when arrival is marked.
+        assertEquals(BigDecimal("9.25"), stockPhysical())
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertEquals("fulfilled", reservationStatus(id))
         val waiting = lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("menunggu_penerimaan"))
         assertEquals("menunggu_penerimaan", waiting.orderStatus)
+        assertEquals(BigDecimal("9.25"), stockPhysical())
+    }
+
+    @Test fun `F5 legacy delivery reservation is fulfilled once when arrival is marked`() {
+        val id = orderFor(req = deliveryRequest(), status = "diantar", payment = "terverifikasi")
+        atSchedule(id)
+        assertEquals("active", reservationStatus(id))
+        lifecycle.updateFulfillment(farmer, id, FulfillmentUpdateRequest("menunggu_penerimaan"))
+        assertEquals(BigDecimal("9.25"), stockPhysical())
+        assertEquals(BigDecimal("0.00"), reserved())
+        assertEquals("fulfilled", reservationStatus(id))
+        lifecycle.receiveByBuyer(buyer, id)
         assertEquals(BigDecimal("9.25"), stockPhysical())
     }
 

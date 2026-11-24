@@ -35,13 +35,14 @@ import kotlinx.coroutines.flow.first
             "schedule" -> if (s.detail?.text("orderId") != orderId) vm.farmerOrder(orderId)
             "profile", "services" -> vm.profile()
             "verification" -> vm.farmerVerification()
+            "notifications" -> vm.notifications()
             "refund-review" -> vm.farmerRefundDetail(refundId)
             "refund-transfer" -> if (s.farmerRefund?.text("id") != refundId) vm.farmerRefundDetail(refundId)
             "refunds" -> vm.refunds()
         }
     }
     BackHandler(route != "home" && !s.busy) {
-        route = when (route) { "schedule" -> "detail"; "detail" -> "orders"; "product" -> "stock"; "refunds", "services", "bank", "qris", "verification" -> "profile"; "refund-review" -> "refunds"; "refund-transfer" -> "refund-review"; else -> "home" }
+        route = when (route) { "schedule" -> "detail"; "detail" -> "orders"; "product" -> "stock"; "refunds", "services", "bank", "qris", "verification", "notifications" -> "profile"; "refund-review" -> "refunds"; "refund-transfer" -> "refund-review"; else -> "home" }
     }
     FarmerTheme {
         val showNav = route in listOf("home", "stock", "orders", "profile", "refunds")
@@ -77,6 +78,7 @@ import kotlinx.coroutines.flow.first
                         "services" -> FarmerServicesScreen(s, { route = "profile" }, vm::saveProfile)
                         "bank" -> FarmerBankScreen(s, { route = "profile" }, vm::bankDetail) { id, bank, account, holder -> vm.saveBank(id, bank, account, holder) { route = "profile" } }
                         "qris" -> FarmerQrisScreen(s, { route = "profile" }, vm::farmerQris) { id, holder, uri -> vm.saveQris(id, holder, uri) { route = "profile" } }
+                        "notifications" -> ConnectedNotifications(s, vm) { route = "profile" }
                         "verification" -> FarmerVerificationScreen(s, { route = "profile" }, { vm.image("petani/ktp/document") }, vm::farmerResubmitKtp)
                         "refunds" -> FarmerRefundListScreen(s, { route = "profile" }, { refundId = it; route = "refund-review" }, { vm.refunds(s.page + 1) })
                         "refund-review", "refund-transfer" -> {

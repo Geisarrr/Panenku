@@ -52,7 +52,7 @@ class OrderStatusRulesTest {
             OrderStatusRules.DIPROSES, "delivery", "diantar"
         )
         assertEquals(OrderStatusRules.DIANTAR, transition.targetStatus)
-        assertEquals(FulfillmentAction.NONE, transition.action)
+        assertEquals(FulfillmentAction.FULFILL_STOCK, transition.action)
     }
 
     @Test

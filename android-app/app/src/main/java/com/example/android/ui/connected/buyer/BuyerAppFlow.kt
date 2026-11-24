@@ -66,6 +66,7 @@ key(state.user!!.id) {
             "completed"->"orders"
             "review"->"completed"
             "notifications"->notificationReturn
+            "late-payments"->"account"
             "product"->productReturn
             "refund-detail"->"refunds"
             "ticket"->"refund-detail"
@@ -89,6 +90,7 @@ key(state.user!!.id) {
                 "ticket"->vm.buyerTicket(ticketId)
                 "store"->vm.buyerStore(storeProduct)
                 "account"->vm.profile()
+                "late-payments"->vm.latePayments(false)
                 "notifications"->vm.buyerNotifications()
                 "admin"->vm.adminQueue()
                 "product"->vm.buyerProduct(productId)
@@ -123,11 +125,12 @@ key(state.user!!.id) {
                     "refunds"->if(buyer)BuyerRefundHub(state,vm,{screen="account"}){refundId=it;screen="refund-detail"} else ConnectedRefunds(state,vm,buyer,admin)
                     "refund-detail"->BuyerRefundDetailScreen(state,vm,refundId,{screen="refunds"}){ticketId=it;screen="ticket"}
                     "ticket"->BuyerTicketScreen(state,vm,ticketId){screen="refund-detail"}
-                    "account"->if(buyer)BuyerAccountScreen(state,vm,{screen="catalog"},{addressReturn="account";screen="buyer-addresses"},{screen="orders"},{screen="refunds"},notifications={notificationReturn="account";screen="notifications"}) else ConnectedAccount(state,vm)
+                    "account"->if(buyer)BuyerAccountScreen(state,vm,{screen="catalog"},{addressReturn="account";screen="buyer-addresses"},{screen="orders"},{screen="refunds"},notifications={notificationReturn="account";screen="notifications"},latePayments={screen="late-payments"}) else ConnectedAccount(state,vm)
                     "notifications"->BuyerNotificationsScreen(state,vm,{screen=notificationReturn}){route,id->
                         when(route){"refund-detail"->refundId=id;"ticket"->ticketId=id;else->{orderId=id;trackingReturn="orders"}}
                         screen=route
                     }
+                    "late-payments"->ConnectedLatePayments(state,vm,false){screen="account"}
                     "store"->BuyerStoreScreen(state,vm){screen=storeReturn}
                     "product"->BuyerProductScreen(state,vm,{screen=productReturn},{screen="cart"},{openStore(it,"product")})
                     "admin"->ConnectedAdmin(state,vm)
