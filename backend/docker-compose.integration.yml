@@ -1,0 +1,60 @@
+# Dedicated local stack. Does not reuse your existing PostgreSQL database.
+name: panenku-integration
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: panenku
+      POSTGRES_USER: panenku
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Run scripts/start-integration.ps1 first}
+    volumes:
+      - integration_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U panenku -d panenku"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build:
+      context: .
+      dockerfile: docker/integration/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/panenku
+      DB_USER: panenku
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      SERVER_PORT: 8080
+      PAYMENT_STORAGE_LOCAL_DIR: /app/private
+      KTP_DUMMY_ENABLED: "true"
+      PRODUCT_PHOTOS_ENABLED: "true"
+      MINIO_ENDPOINT: http://photos:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://10.0.2.2:9000}
+      MINIO_ACCESS_KEY: panenku-local
+      MINIO_SECRET_KEY: ${STORAGE_PASSWORD:?Set STORAGE_PASSWORD}
+      PRODUCT_PHOTOS_BUCKET: panenku-products
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      photos:
+        condition: service_started
+    volumes:
+      - integration_proofs:/app/private
+  photos:
+    image: panenku-product-minio:9e49d5e
+    build:
+      context: .
+      dockerfile: docker/product-photos/Dockerfile
+    environment:
+      MINIO_ROOT_USER: panenku-local
+      MINIO_ROOT_PASSWORD: ${STORAGE_PASSWORD:?Set STORAGE_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - integration_photos:/data
+volumes:
+  integration_db:
+  integration_proofs:
+  integration_photos:
