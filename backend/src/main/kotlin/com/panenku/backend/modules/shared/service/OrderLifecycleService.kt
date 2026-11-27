@@ -310,7 +310,8 @@ class OrderLifecycleService(
             items = items,
             history = rows,
             effectiveSchedule = scheduleGuard.effective(order),
-            pendingScheduleChange = scheduleGuard.pending(order)
+            pendingScheduleChange = scheduleGuard.pending(order),
+            serverTime = Instant.now(clock)
         )
     }
 

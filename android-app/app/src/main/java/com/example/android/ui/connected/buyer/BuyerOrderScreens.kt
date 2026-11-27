@@ -1,6 +1,7 @@
 package id.panenku.app.ui.connected.buyer
 
 import android.graphics.BitmapFactory
+import android.os.SystemClock
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,23 @@ import java.time.Instant
     var now by remember { mutableStateOf(clock()) }
     LaunchedEffect(Unit) { while(true) { kotlinx.coroutines.delay(1000);now=clock() } }
     return now
+}
+
+// Anchor the backend clock to monotonic elapsed time so the refund window keeps
+// advancing even when the device wall clock differs from the server's clock.
+@Composable internal fun refundNow(order: JsonObject): Instant {
+    val serverTime = order.text("serverTime")
+    val clock = LocalBuyerClock.current
+    val anchor = remember(serverTime) { runCatching { Instant.parse(serverTime) }.getOrNull() }
+    val started = remember(serverTime) { SystemClock.elapsedRealtime() }
+    var elapsed by remember(serverTime) { mutableLongStateOf(0L) }
+    LaunchedEffect(serverTime) {
+        while (true) {
+            elapsed = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    return anchor?.plusMillis(elapsed) ?: clock()
 }
 @Composable internal fun BuyerPaymentScreen(s: ConnectedState, vm: ConnectedViewModel, back: () -> Unit) {
     val order=s.detail
@@ -149,7 +167,7 @@ import java.time.Instant
     if(order==null) {BPage("Lacak pesanan","Memuat pesanan…",back){FText("Memuat status terbaru…")};return}
     val id=order.text("orderId");val status=order.text("orderStatus")
     var receive by remember{mutableStateOf(false)};var issue by remember{mutableStateOf(false)}
-    val eligible=s.buyerTransactionLoaded && canRequestBuyerRefund(order,s.refunds,transactionNow())
+    val eligible=s.buyerTransactionLoaded && canRequestBuyerRefund(order,s.refunds,refundNow(order))
     BPage("Lacak pesanan","#${shortId(id)} · ${if(order.text("fulfillmentMethod")=="pickup") "Ambil sendiri" else "Antar oleh petani"}",back) {
         BNotice(if(status=="menunggu_penerimaan") "Pesanan tiba, periksa hasil panen" else buyerStatus(status),
             if(status=="menunggu_penerimaan") "Menunggu Penerimaan → Belum Selesai. Konfirmasi setelah jumlah dan kondisi barang kamu periksa." else "Periksa status pesanan terbaru sebelum melanjutkan tindakan.")

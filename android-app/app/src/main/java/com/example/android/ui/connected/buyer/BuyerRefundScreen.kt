@@ -21,7 +21,7 @@ import java.time.Instant
     var bank by rememberSaveable(id){mutableStateOf("")};var account by rememberSaveable(id){mutableStateOf("")};var name by rememberSaveable(id){mutableStateOf("")}
     var uri by rememberSaveable(id){mutableStateOf<String?>(null)};var file by rememberSaveable(id){mutableStateOf("")}
     var agreed by rememberSaveable(id){mutableStateOf(false)};var imageError by remember{mutableStateOf<String?>(null)}
-    val now=transactionNow()
+    val now=refundNow(order)
     val eligible=s.buyerTransactionLoaded && canRequestBuyerRefund(order,s.refunds,now)
     val pick=rememberBuyerImagePicker({u,n,_->uri=u;file=n;imageError=null},{imageError=it})
     val combined=listOf(reason,details).filter(String::isNotBlank).joinToString(": ")
